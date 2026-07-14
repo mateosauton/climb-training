@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, ShieldAlert, X } from "lucide-react";
+import { Dialog } from "radix-ui";
 import type { TrainingSession } from "@/lib/training";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -20,10 +21,12 @@ type Props = {
   onCloseToPlan: () => void;
   onOpenLog: (sessionId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  onOpenInternal?: (target: "video" | "profile") => void;
   now?: () => string;
 };
 
-export function GuidedSessionFlow({ session, definition, definitions, storage = window.localStorage, onCloseToPlan, onOpenLog, onSelectSession, now = () => new Date().toISOString() }: Props) {
+export function GuidedSessionFlow({ session, definition, definitions, storage = window.localStorage, onCloseToPlan, onOpenLog, onSelectSession, onOpenInternal, now = () => new Date().toISOString() }: Props) {
+  const restoreFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const initial = useRef<{ state: GuidedSessionState; warning: string | null } | null>(null);
   if (!initial.current) {
     const loaded = loadGuidedSessionState(storage, definitions, now());
@@ -74,9 +77,29 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
     headingRef.current?.focus();
   }, [block, run?.currentBlockIndex, run?.status]);
 
+  const modal = (content: React.ReactNode) => (
+    <Dialog.Root open modal onOpenChange={(open) => { if (!open) setExitOpen(true); }}>
+      <Dialog.Portal>
+        <Dialog.Content
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex min-w-0 flex-col overflow-hidden bg-background text-foreground outline-none"
+          data-testid="guided-session-flow"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreFocusRef.current?.focus();
+          }}
+        >
+          <Dialog.Title className="sr-only">Sesión guiada</Dialog.Title>
+          <Dialog.Description className="sr-only">Guía paso a paso para completar la sesión seleccionada.</Dialog.Description>
+          {content}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+
   if (!definition || !definition.blocks.length) {
-    return (
-      <div className="fixed inset-0 z-50 grid place-items-center bg-background p-4">
+    return modal(
+      <div className="grid min-h-full place-items-center gap-4 p-4">
         <Alert className="max-w-md"><ShieldAlert aria-hidden="true" /><AlertTitle>Esta sesión todavía no tiene guía</AlertTitle><AlertDescription>Volvé al plan para consultar el detalle existente.</AlertDescription></Alert>
         <Button className="h-11" onClick={onCloseToPlan}>Volver al plan</Button>
       </div>
@@ -89,8 +112,8 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
     setConflictOpen(false);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex min-w-0 flex-col overflow-hidden bg-background text-foreground" data-testid="guided-session-flow">
+  return modal(
+    <>
       {run?.status === "active" && run.sessionId === session.id && (
         <header className="z-10 flex shrink-0 items-center gap-3 border-b bg-background/95 px-3 pb-3 pt-[max(.75rem,env(safe-area-inset-top))] backdrop-blur sm:px-6">
           <Button type="button" variant="ghost" size="icon-lg" className="size-11" aria-label="Pausar o salir" onClick={() => setExitOpen(true)}><X aria-hidden="true" /></Button>
@@ -115,6 +138,10 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
               onNext={() => transition({ type: "GO_TO_BLOCK", index: run.currentBlockIndex + 1, definition, now: now() })}
               onComplete={() => transition({ type: "COMPLETE_BLOCK", blockId: block.id, definition, now: now() })}
               onSkip={() => transition({ type: "SKIP_BLOCK", blockId: block.id, definition, now: now() })}
+              onOpenInternal={(target) => {
+                transition({ type: "PAUSE", now: now() });
+                if (target === "video" || target === "profile") onOpenInternal?.(target);
+              }}
               headingRef={headingRef}
             />
           </>
@@ -139,6 +166,6 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

@@ -15,12 +15,13 @@ type Props = {
   onNext: () => void;
   onComplete: () => void;
   onSkip: () => void;
+  onOpenInternal?: (target: string) => void;
   headingRef: RefObject<HTMLHeadingElement | null>;
 };
 
 const phaseLabels: Record<GuidedBlock["phase"], string> = { prepare: "Preparación", work: "Trabajo", rest: "Recuperación", cooldown: "Vuelta a la calma", review: "Revisión" };
 
-export function GuidedBlockView({ block, index, total, isCompleted, onPrevious, onNext, onComplete, onSkip, headingRef }: Props) {
+export function GuidedBlockView({ block, index, total, isCompleted, onPrevious, onNext, onComplete, onSkip, onOpenInternal, headingRef }: Props) {
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-5 pb-32 sm:px-6 sm:py-8 sm:pb-28">
       <div className="mb-4 space-y-2">
@@ -39,7 +40,7 @@ export function GuidedBlockView({ block, index, total, isCompleted, onPrevious, 
           <section><h2 className="mb-2 font-semibold">Pasos</h2><ol aria-label="Pasos" className="list-decimal space-y-2 pl-5">{block.steps.map((step) => <li key={step}>{step.replace(/^\d+\.\s*/, "")}</li>)}</ol></section>
           <section><h2 className="mb-2 font-semibold">Claves</h2><ul className="list-disc space-y-1 pl-5">{block.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul></section>
           {block.avoid && <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"><h2 className="mb-1 font-semibold text-destructive">Evitar</h2><p>{block.avoid}</p></section>}
-          <GuidedMedia media={block.media} />
+          <GuidedMedia media={block.media} onOpenInternal={onOpenInternal} />
         </CardContent>
       </Card>
 

@@ -8,6 +8,7 @@ import { SessionStartSummary } from "./SessionStartSummary";
 import { GuidedBlockView } from "./GuidedBlockView";
 import { GuidedSessionExitDialog } from "./GuidedSessionExitDialog";
 import { SessionCompletion } from "./SessionCompletion";
+import { GuidedResumeBanner } from "./GuidedResumeBanner";
 
 const session: TrainingSession = { id: "w1d1", week: 1, day: 1, date: "2026-07-09", start: "18:30", end: "20:00", phase: "Calibracion", type: "Limit + fuerza", title: "Escalada W1D1 - Limit + fuerza", intensity: "alta", summary: "Resumen", drills: [] };
 const block: GuidedBlock = {
@@ -68,6 +69,28 @@ describe("guided session screens", () => {
     expect(screen.getByRole("link", { name: /abrir en youtube/i })).toHaveAttribute("href", block.media[0].url);
   });
 
+  it("explains offline video requirements and recovers when connectivity returns", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false });
+    render(<GuidedMedia media={block.media} />);
+    await userEvent.click(screen.getByRole("button", { name: /ver demostración/i }));
+
+    expect(screen.getByText("El video necesita conexión")).toBeInTheDocument();
+    expect(screen.queryByTitle(/tecnica de pies/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /abrir en youtube/i })).toBeInTheDocument();
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    window.dispatchEvent(new Event("online"));
+    expect(await screen.findByTitle(/tecnica de pies/i)).toBeInTheDocument();
+    expect(screen.queryByText("El video necesita conexión")).not.toBeInTheDocument();
+  });
+
+  it("routes internal tracker references through a callback", async () => {
+    const onOpenInternal = vi.fn();
+    render(<GuidedMedia media={[{ id: "profile", kind: "internal", label: "Perfil y respaldo", url: "#profile" }]} onOpenInternal={onOpenInternal} />);
+    await userEvent.click(screen.getByRole("button", { name: /abrir en la app: perfil y respaldo/i }));
+    expect(onOpenInternal).toHaveBeenCalledWith("profile");
+  });
+
   it("offers accessible pause and destructive discard confirmation", async () => {
     const onPause = vi.fn();
     const onDiscard = vi.fn();
@@ -84,5 +107,15 @@ describe("guided session screens", () => {
     expect(screen.getByText(/1 completado/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /registrar resultados/i }));
     expect(onOpenLog).toHaveBeenCalledWith("w1d1");
+  });
+
+  it("summarizes a paused run and resumes it directly from Plan", async () => {
+    const onResume = vi.fn();
+    render(<GuidedResumeBanner session={session} definition={definition} run={{ ...run, status: "paused", currentBlockIndex: 0, completedAt: null }} onResume={onResume} />);
+    expect(screen.getByText(/sesión pausada/i)).toBeInTheDocument();
+    expect(screen.getByText(/w1d1 - limit \+ fuerza/i)).toBeInTheDocument();
+    expect(screen.getByText(/bloque 1 de 1/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /continuar sesión/i }));
+    expect(onResume).toHaveBeenCalledOnce();
   });
 });

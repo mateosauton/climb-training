@@ -115,6 +115,7 @@ import {
 } from "@/lib/profile-questionnaire";
 import { cn } from "@/lib/utils";
 import { GuidedSessionFlow } from "@/features/guided-session/GuidedSessionFlow";
+import { GuidedResumeBanner } from "@/features/guided-session/GuidedResumeBanner";
 import { guidedSessionDefinitions } from "@/features/guided-session/guided-session-data";
 import { loadGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import {
@@ -1968,6 +1969,19 @@ export default function App() {
 
         <TabsContent value="plan" className="mt-0">
           <section className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[21rem_minmax(0,1fr)]">
+            {activeGuidedRun?.status === "paused" && guidedSessionDefinitions[activeGuidedRun.sessionId] ? (
+              <div className="lg:col-span-2">
+                <GuidedResumeBanner
+                  session={sessionById(activeGuidedRun.sessionId)}
+                  definition={guidedSessionDefinitions[activeGuidedRun.sessionId]}
+                  run={activeGuidedRun}
+                  onResume={() => {
+                    selectSession(activeGuidedRun.sessionId);
+                    setGuidedSessionOpen(true);
+                  }}
+                />
+              </div>
+            ) : null}
             <Card className="border-border/70 bg-card/90 lg:sticky lg:top-4 lg:self-start">
               <CardHeader className="space-y-3">
                 <div>
@@ -2773,6 +2787,10 @@ export default function App() {
               setGuidedSessionOpen(false);
             }}
             onSelectSession={(sessionId) => selectSession(sessionId)}
+            onOpenInternal={(target) => {
+              setActiveTab(target);
+              setGuidedSessionOpen(false);
+            }}
           />
         ) : null}
       </div>

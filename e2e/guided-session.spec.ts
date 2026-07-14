@@ -4,10 +4,14 @@ async function openPlan(page: Page) {
   await page.goto("./");
   const deferProfile = page.getByRole("button", { name: "Completar mas tarde" });
   if (await deferProfile.isVisible().catch(() => false)) await deferProfile.click();
-  const mobilePlan = page.getByRole("tab", { name: "Plan" });
-  if (await mobilePlan.isVisible().catch(() => false)) await mobilePlan.click();
-  else await page.getByRole("button", { name: "Plan" }).click();
+  await openTab(page, "Plan");
   await expect(page.getByText("Plan por dia", { exact: true })).toBeVisible();
+}
+
+async function openTab(page: Page, name: "Plan" | "Video" | "Perfil") {
+  const mobileTab = page.getByRole("tab", { name });
+  if (await mobileTab.isVisible().catch(() => false)) await mobileTab.click();
+  else await page.getByRole("button", { name }).click();
 }
 
 async function selectSession(page: Page, sessionId: string) {
@@ -59,10 +63,10 @@ test("pause, reload and resume at the same unresolved block", async ({ page }) =
   const expectedHeading = await page.locator("h1").textContent();
   await page.getByRole("button", { name: "Pausar o salir" }).click();
   await page.getByRole("button", { name: "Pausar y salir" }).click();
+  await expect(page.getByLabel("Sesión pausada")).toContainText(/w1d1 - limit \+ fuerza · bloque 2 de 6/i);
+  await expect(page.getByLabel("Sesión pausada").getByRole("button", { name: "Continuar sesión" })).toBeVisible();
   await page.reload();
-  const mobilePlan = page.getByRole("tab", { name: "Plan" });
-  if (await mobilePlan.isVisible().catch(() => false)) await mobilePlan.click();
-  else await page.getByRole("button", { name: "Plan" }).click();
+  await openTab(page, "Plan");
   await page.getByRole("button", { name: /continuar sesión/i }).first().click();
   await expect(page.locator("h1")).toHaveText(expectedHeading || "");
 });
@@ -74,12 +78,12 @@ test("active-session conflict supports cancel and discard", async ({ page }) => 
   await page.getByRole("button", { name: "Pausar o salir" }).click();
   await page.getByRole("button", { name: "Pausar y salir" }).click();
   await selectSession(page, "w1d2");
-  await launchSelected(page);
+  await page.getByRole("button", { name: "Iniciar sesión" }).first().click();
   await expect(page.getByRole("alertdialog", { name: "Sesión en curso" })).toBeVisible();
   await page.getByRole("button", { name: "Cancelar" }).click();
   await expect(page.getByText("Plan por dia", { exact: true })).toBeVisible();
 
-  await launchSelected(page);
+  await page.getByRole("button", { name: "Iniciar sesión" }).first().click();
   await page.getByRole("button", { name: "Descartar y empezar esta" }).click();
   await expect(page.getByTestId("guided-session-flow").getByRole("heading", { name: /w1d2 - fuerza general/i })).toBeVisible();
 });
@@ -105,6 +109,11 @@ test("written guidance remains usable offline", async ({ page, context }) => {
   await launchSelected(page);
   await page.getByRole("button", { name: "Empezar sesión" }).click();
   await context.setOffline(true);
+  await page.getByRole("button", { name: /ver demostración/i }).click();
+  await expect(page.getByText("El video necesita conexión")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Abrir en YouTube" })).toBeVisible();
+  await context.setOffline(false);
+  await expect(page.locator("iframe")).toBeVisible();
   await page.getByRole("button", { name: /completar y seguir/i }).click();
   await expect(page.locator("h1")).toBeVisible();
   await assertMobileLayout(page);
@@ -121,8 +130,21 @@ test("rest day can be completed", async ({ page }) => {
 
 test("keyboard opens and operates the exit dialog", async ({ page }) => {
   await openPlan(page);
-  await launchSelected(page);
+  const opener = page.getByRole("button", { name: "Iniciar sesión" }).first();
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: "Sesión guiada" });
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  const underlyingDashboard = page.locator("button").filter({ hasText: "Dashboard" }).first();
+  expect(await underlyingDashboard.evaluate((element) => Boolean(element.closest("[aria-hidden='true']")))).toBe(true);
+  await underlyingDashboard.evaluate((element: HTMLElement) => element.focus());
+  await expect(dialog).toContainText(/w1d1 - limit \+ fuerza/i);
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.getByRole("button", { name: "Empezar sesión" }).click();
+  const focusableButtons = dialog.locator("button:visible:not([disabled])");
+  const count = await focusableButtons.count();
+  await focusableButtons.nth(count - 1).focus();
+  await page.keyboard.press("Tab");
+  await expect(focusableButtons.first()).toBeFocused();
   const exit = page.getByRole("button", { name: "Pausar o salir" });
   await exit.focus();
   await page.keyboard.press("Enter");
@@ -131,6 +153,25 @@ test("keyboard opens and operates the exit dialog", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.getByRole("alertdialog", { name: "Pausar sesión" })).toBeHidden();
   await expect(exit).toBeVisible();
+});
+
+test("internal guide references open Profile and Video tabs", async ({ page }) => {
+  await openPlan(page);
+  await selectSession(page, "w4d7");
+  await launchSelected(page);
+  await page.getByRole("button", { name: "Empezar sesión" }).click();
+  await page.getByRole("button", { name: /abrir en la app: perfil y respaldo/i }).click();
+  await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
+
+  await page.evaluate(() => localStorage.removeItem("climb4w.guided.v1"));
+  await openTab(page, "Plan");
+  await selectSession(page, "w4d6");
+  await launchSelected(page);
+  await page.getByRole("button", { name: "Empezar sesión" }).click();
+  await page.getByRole("button", { name: /completar y seguir/i }).click();
+  await page.getByRole("button", { name: /completar y seguir/i }).click();
+  await page.getByRole("button", { name: /abrir en la app: video propio/i }).click();
+  await expect(page.getByText("Video", { exact: true }).first()).toBeVisible();
 });
 
 test("runner has no horizontal overflow in light and dark themes", async ({ page }) => {
