@@ -55,10 +55,11 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
   useEffect(() => {
     const run = stateRef.current.activeRun;
     if (!definition || !definition.blocks.length) return;
-    if (!run || run.status === "completed") {
+    if (!run) {
       transition({ type: "CREATE_RUN", sessionId: session.id, definition, now: now() });
     } else if (run.sessionId !== session.id) {
-      setConflictOpen(true);
+      if (run.status === "completed") transition({ type: "CREATE_RUN", sessionId: session.id, definition, now: now() });
+      else setConflictOpen(true);
     } else if (run.status === "paused") {
       transition({ type: "RESUME", definition, now: now() });
     }
@@ -132,7 +133,7 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Sesión en curso</AlertDialogTitle><AlertDialogDescription>Hay otra sesión sin terminar. Elegí cuál querés continuar.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-11">Cancelar</AlertDialogCancel>
+            <AlertDialogCancel className="h-11" onClick={onCloseToPlan}>Cancelar</AlertDialogCancel>
             <AlertDialogAction className="h-11" variant="outline" onClick={() => run && onSelectSession?.(run.sessionId)}>Volver a la sesión activa</AlertDialogAction>
             <AlertDialogAction className="h-11" variant="destructive" onClick={handleStartSelected}>Descartar y empezar esta</AlertDialogAction>
           </AlertDialogFooter>
