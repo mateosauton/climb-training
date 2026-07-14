@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  branch-policy:
+    name: Branch policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request path
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          if [[ "$BASE_BRANCH" == "main" && "$HEAD_BRANCH" != "dev" ]]; then
+            echo "Pull requests to main must come from dev."
+            exit 1
+          fi
+
+          if [[ "$BASE_BRANCH" == "dev" && ! "$HEAD_BRANCH" =~ ^(feature|fix|chore|docs)/.+$ ]]; then
+            echo "Pull requests to dev must use feature/*, fix/*, chore/*, or docs/*."
+            exit 1
+          fi
+
+  quality:
+    name: Quality
+    needs: branch-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit and component tests
+        run: npm test -- --run
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Run questionnaire regression test
+        run: npm run test:questionnaire
+
+      - name: Build production bundle
+        run: npm run build
+
+  e2e:
+    name: Browser tests
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run desktop and mobile browser tests
+        run: npm run test:e2e
