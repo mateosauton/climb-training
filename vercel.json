@@ -1,0 +1,26 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/escalada/assets/:path*",
+      "destination": "/assets/:path*"
+    },
+    {
+      "source": "/escalada/data/:path*",
+      "destination": "/data/:path*"
+    },
+    {
+      "source": "/escalada",
+      "destination": "/"
+    },
+    {
+      "source": "/escalada/:path*",
+      "destination": "/"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/"
+    }
+  ]
+}
