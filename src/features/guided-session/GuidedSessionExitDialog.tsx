@@ -12,10 +12,10 @@ export function GuidedSessionExitDialog({ open, onOpenChange, onPause, onDiscard
           <AlertDialogTitle>Pausar sesión</AlertDialogTitle>
           <AlertDialogDescription>Tu progreso queda guardado para continuar desde el plan.</AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="h-11">Seguir entrenando</AlertDialogCancel>
-          <AlertDialogAction className="h-11" onClick={onPause}>Pausar y salir</AlertDialogAction>
-          <AlertDialogAction className="h-11" variant="destructive" onClick={onDiscard}>Descartar sesión</AlertDialogAction>
+        <AlertDialogFooter className="grid grid-cols-1 sm:grid-cols-2 sm:justify-stretch">
+          <AlertDialogCancel className="min-h-11 w-full">Seguir entrenando</AlertDialogCancel>
+          <AlertDialogAction className="min-h-11 w-full" onClick={onPause}>Pausar y salir</AlertDialogAction>
+          <AlertDialogAction className="min-h-11 w-full sm:col-span-2" variant="destructive" onClick={onDiscard}>Descartar sesión</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
