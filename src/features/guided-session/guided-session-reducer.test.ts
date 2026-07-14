@@ -16,6 +16,7 @@ const definition: GuidedSessionDefinition = {
     cues: [id],
     equipment: [],
     media: [],
+    exerciseSections: [],
     narrationText: id
   }))
 };

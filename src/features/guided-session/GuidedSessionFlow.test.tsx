@@ -10,7 +10,7 @@ import { GuidedSessionFlow } from "./GuidedSessionFlow";
 
 const session: TrainingSession = { id: "w1d1", week: 1, day: 1, date: "2026-07-09", start: "18:30", end: "20:00", phase: "Calibracion", type: "Limit", title: "Escalada W1D1 - Limit", intensity: "alta", summary: "Resumen", drills: [] };
 const otherSession: TrainingSession = { ...session, id: "w1d2", day: 2, title: "Escalada W1D2 - Fuerza" };
-const block = (id: string) => ({ id, phase: "work" as const, title: `Bloque ${id}`, instruction: "Hace el bloque", steps: ["Paso"], dose: "1 serie, descanso 1 min", cues: ["Control"], avoid: "Detente con dolor", equipment: [], media: [], narrationText: "Hace" });
+const block = (id: string) => ({ id, phase: "work" as const, title: `Bloque ${id}`, instruction: "Hace el bloque", steps: ["Paso"], dose: "1 serie, descanso 1 min", cues: ["Control"], avoid: "Detente con dolor", equipment: [], media: [], exerciseSections: [], narrationText: "Hace" });
 const definition: GuidedSessionDefinition = { sessionId: session.id, version: 1, objective: "Objetivo", safetyNote: "Seguridad", blocks: [block("a"), block("b")] };
 const otherDefinition: GuidedSessionDefinition = { ...definition, sessionId: otherSession.id };
 const definitions = { w1d1: definition, w1d2: otherDefinition };

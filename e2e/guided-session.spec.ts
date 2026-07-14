@@ -160,7 +160,7 @@ test("internal guide references open Profile and Video tabs", async ({ page }) =
   await selectSession(page, "w4d7");
   await launchSelected(page);
   await page.getByRole("button", { name: "Empezar sesión" }).click();
-  await page.getByRole("button", { name: /abrir en la app: perfil y respaldo/i }).click();
+  await page.getByRole("button", { name: /abrir en la app:.*perfil y respaldo/i }).click();
   await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
 
   await page.evaluate(() => localStorage.removeItem("climb4w.guided.v1"));
@@ -170,7 +170,7 @@ test("internal guide references open Profile and Video tabs", async ({ page }) =
   await page.getByRole("button", { name: "Empezar sesión" }).click();
   await page.getByRole("button", { name: /completar y seguir/i }).click();
   await page.getByRole("button", { name: /completar y seguir/i }).click();
-  await page.getByRole("button", { name: /abrir en la app: video propio/i }).click();
+  await page.getByRole("button", { name: /abrir en la app:.*video propio/i }).click();
   await expect(page.getByText("Video", { exact: true }).first()).toBeVisible();
 });
 

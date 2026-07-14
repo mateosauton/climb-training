@@ -11,6 +11,17 @@ export type GuidedMedia = {
 
 export type GuidedBlockPhase = "prepare" | "work" | "rest" | "cooldown" | "review";
 
+export type GuidedExerciseSection = {
+  id: string;
+  title: string;
+  rationale: string;
+  cues: string[];
+  avoid?: string;
+  equipment: string[];
+  media: GuidedMedia[];
+  textOnlyReason?: string;
+};
+
 export type GuidedBlock = {
   id: string;
   phase: GuidedBlockPhase;
@@ -24,6 +35,7 @@ export type GuidedBlock = {
   avoid?: string;
   equipment: string[];
   media: GuidedMedia[];
+  exerciseSections: GuidedExerciseSection[];
   narrationText: string;
 };
 

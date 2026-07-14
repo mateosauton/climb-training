@@ -22,6 +22,7 @@ type Props = {
 const phaseLabels: Record<GuidedBlock["phase"], string> = { prepare: "Preparación", work: "Trabajo", rest: "Recuperación", cooldown: "Vuelta a la calma", review: "Revisión" };
 
 export function GuidedBlockView({ block, index, total, isCompleted, onPrevious, onNext, onComplete, onSkip, onOpenInternal, headingRef }: Props) {
+  const isCompound = block.exerciseSections.length > 1;
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-5 pb-32 sm:px-6 sm:py-8 sm:pb-28">
       <div className="mb-4 space-y-2">
@@ -36,10 +37,28 @@ export function GuidedBlockView({ block, index, total, isCompleted, onPrevious, 
         </CardHeader>
         <CardContent className="space-y-5">
           {block.dose && <section><h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Dosis</h2><p className="text-base font-medium">{block.dose}</p></section>}
-          {block.rationale && <section><h2 className="mb-1 font-semibold">Por qué</h2><p className="text-muted-foreground">{block.rationale}</p></section>}
-          <section><h2 className="mb-2 font-semibold">Pasos</h2><ol aria-label="Pasos" className="list-decimal space-y-2 pl-5">{block.steps.map((step) => <li key={step}>{step.replace(/^\d+\.\s*/, "")}</li>)}</ol></section>
-          <section><h2 className="mb-2 font-semibold">Claves</h2><ul className="list-disc space-y-1 pl-5">{block.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul></section>
-          {block.avoid && <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"><h2 className="mb-1 font-semibold text-destructive">Evitar</h2><p>{block.avoid}</p></section>}
+          {isCompound ? (
+            <section aria-labelledby="compound-instructions-title" className="space-y-3">
+              <h2 id="compound-instructions-title" className="font-semibold">Instrucciones por ejercicio</h2>
+              {block.exerciseSections.map((section) => (
+                <article key={section.id} className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                  <h3 className="font-heading text-lg font-semibold">{section.title}</h3>
+                  <p className="text-muted-foreground">{section.rationale}</p>
+                  <div><h4 className="mb-1 text-sm font-semibold">Claves</h4><ul className="list-disc space-y-1 pl-5">{section.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul></div>
+                  {section.equipment.length > 0 && <p className="text-sm"><span className="font-semibold">Equipo:</span> {section.equipment.join(", ")}</p>}
+                  {section.avoid && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"><h4 className="mb-1 font-semibold text-destructive">Evitar</h4><p>{section.avoid}</p></div>}
+                  {section.textOnlyReason && <p className="text-xs text-muted-foreground">Guía escrita: {section.textOnlyReason}</p>}
+                </article>
+              ))}
+            </section>
+          ) : (
+            <>
+              {block.rationale && <section><h2 className="mb-1 font-semibold">Por qué</h2><p className="text-muted-foreground">{block.rationale}</p></section>}
+              <section><h2 className="mb-2 font-semibold">Pasos</h2><ol aria-label="Pasos" className="list-decimal space-y-2 pl-5">{block.steps.map((step) => <li key={step}>{step.replace(/^\d+\.\s*/, "")}</li>)}</ol></section>
+              <section><h2 className="mb-2 font-semibold">Claves</h2><ul className="list-disc space-y-1 pl-5">{block.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul></section>
+              {block.avoid && <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"><h2 className="mb-1 font-semibold text-destructive">Evitar</h2><p>{block.avoid}</p></section>}
+            </>
+          )}
           <GuidedMedia media={block.media} onOpenInternal={onOpenInternal} />
         </CardContent>
       </Card>

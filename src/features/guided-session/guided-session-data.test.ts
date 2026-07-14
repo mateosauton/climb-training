@@ -35,6 +35,25 @@ const expectedDayContent: Record<string, Array<[string, string]>> = {
   w4d7: [["review", "Comparar W1 con W4: mejor link, intentos, movimientos antes de caer, RPE, bombeo y dolor. Decidir el siguiente bloque."]]
 };
 
+const expectedCompoundConstituents: Record<string, Record<string, string[]>> = {
+  w1d1: { rings: ["ringRow", "ringPushup"], prehab: ["externalRotation", "fingerExtensors"] },
+  w1d2: { core: ["hollowHold", "deadBug", "sidePlank"], prehab: ["externalRotation", "ytw", "fingerExtensors"] },
+  w1d3: { cooldown: ["generalCooldown", "fingerExtensors"] },
+  w1d4: { bands: ["externalRotation", "facePull"] },
+  w1d5: { accessory: ["scapPullup", "lockoff"], focus: ["deadpoint", "activeFeet"] },
+  w1d6: { focus: ["activeFeet", "breathingPacing"], prehab: ["generalPrehab"] },
+  w2d1: { rings: ["ringRow", "ringSupport"], prehab: ["bandPrehab", "fingerExtensors"] },
+  w2d2: { focus: ["activeFeet", "scapularTechnique"] },
+  w2d3: { prehab: ["bandPrehab", "fingerExtensors"] },
+  w2d4: { prehab: ["shoulderPrehab", "elbowPrehab"] },
+  w2d5: { core: ["hollowHold", "sidePlank"] },
+  w3d1: { prehab: ["easyRings", "generalPrehab"] },
+  w3d2: { prehab: ["bandPrehab", "fingerExtensors"] },
+  w4d1: { prehab: ["bandPrehab", "fingerExtensors"] },
+  w4d2: { prehab: ["bandPrehab", "fingerExtensors"] },
+  w4d3: { cooldown: ["generalCooldown", "generalPrehab"] }
+};
+
 describe("guided session content", () => {
   it("authors exactly one non-empty guide for every plan session", () => {
     expect(Object.keys(guidedSessionDefinitions).sort()).toEqual(plan.map(({ id }) => id).sort());
@@ -63,6 +82,14 @@ describe("guided session content", () => {
         expect(block.cues.length).toBeGreaterThan(0);
         expect(block.narrationText.trim()).not.toBe("");
         expect(Array.isArray(block.equipment)).toBe(true);
+        expect(block.exerciseSections.length).toBeGreaterThan(0);
+
+        for (const section of block.exerciseSections) {
+          expect(section.title.trim()).not.toBe("");
+          expect(section.rationale.trim()).not.toBe("");
+          expect(section.cues.length).toBeGreaterThan(0);
+          expect(section.media.length > 0 || Boolean(section.textOnlyReason?.trim())).toBe(true);
+        }
 
         if (block.phase === "work") {
           expect(block.dose?.trim()).not.toBe("");
@@ -85,6 +112,27 @@ describe("guided session content", () => {
     expect(Object.keys(expectedDayContent).sort()).toEqual(plan.map(({ id }) => id).sort());
     for (const [sessionId, expectedBlocks] of Object.entries(expectedDayContent)) {
       expect(guidedSessionDefinitions[sessionId].blocks.map(({ id, dose }) => [id, dose])).toEqual(expectedBlocks);
+    }
+  });
+
+  it("provides attributed guidance for every compound-block constituent", () => {
+    for (const [sessionId, expectedBlocks] of Object.entries(expectedCompoundConstituents)) {
+      for (const [blockId, expectedConstituents] of Object.entries(expectedBlocks)) {
+        const block = guidedSessionDefinitions[sessionId].blocks.find(({ id }) => id === blockId);
+        expect(block, `${sessionId}/${blockId}`).toBeDefined();
+        expect(block?.exerciseSections.map(({ id }) => id).sort(), `${sessionId}/${blockId} constituents`).toEqual([...expectedConstituents].sort());
+
+        for (const section of block?.exerciseSections ?? []) {
+          expect(section.title.trim(), `${sessionId}/${blockId}/${section.id} title`).not.toBe("");
+          expect(section.rationale.trim(), `${sessionId}/${blockId}/${section.id} rationale`).not.toBe("");
+          expect(section.cues.length, `${sessionId}/${blockId}/${section.id} cues`).toBeGreaterThan(0);
+          expect(
+            section.media.length > 0 || Boolean(section.textOnlyReason?.trim()),
+            `${sessionId}/${blockId}/${section.id} media or text-only reason`
+          ).toBe(true);
+          expect(block?.steps.some((step) => step.includes(section.title)), `${sessionId}/${blockId}/${section.id} attributed steps`).toBe(true);
+        }
+      }
     }
   });
 

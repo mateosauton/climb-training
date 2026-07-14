@@ -9,6 +9,7 @@ import { GuidedBlockView } from "./GuidedBlockView";
 import { GuidedSessionExitDialog } from "./GuidedSessionExitDialog";
 import { SessionCompletion } from "./SessionCompletion";
 import { GuidedResumeBanner } from "./GuidedResumeBanner";
+import { guidedSessionDefinitions } from "./guided-session-data";
 
 const session: TrainingSession = { id: "w1d1", week: 1, day: 1, date: "2026-07-09", start: "18:30", end: "20:00", phase: "Calibracion", type: "Limit + fuerza", title: "Escalada W1D1 - Limit + fuerza", intensity: "alta", summary: "Resumen", drills: [] };
 const block: GuidedBlock = {
@@ -24,12 +25,23 @@ const block: GuidedBlock = {
   avoid: "Detente si aparece dolor o baja la velocidad.",
   equipment: ["Palestra", "Pies de gato"],
   media: [{ id: "video", kind: "youtube", label: "Tecnica de pies", url: "https://www.youtube.com/watch?v=8ZAdKNgdYm8", youtubeId: "8ZAdKNgdYm8" }],
+  exerciseSections: [],
   narrationText: "Board 45"
 };
 const definition: GuidedSessionDefinition = { sessionId: session.id, version: 1, objective: "Calibrar intensidad", safetyNote: "Para ante dolor mayor a 2/10.", blocks: [block] };
 const run: GuidedRun = { id: "run", schemaVersion: 1, definitionVersion: 1, sessionId: session.id, status: "completed", currentBlockIndex: 0, completedBlockIds: [block.id], skippedBlockIds: [], startedAt: "2026-07-14T10:00:00.000Z", completedAt: "2026-07-14T10:20:00.000Z", activeSegmentStartedAt: null, accumulatedActiveSeconds: 1200, updatedAt: "2026-07-14T10:20:00.000Z" };
 
 describe("guided session screens", () => {
+  it("renders each compound exercise as an attributed instruction section", () => {
+    const rings = guidedSessionDefinitions.w1d1.blocks.find(({ id }) => id === "rings")!;
+    render(<GuidedBlockView block={rings} index={0} total={1} isCompleted={false} onPrevious={vi.fn()} onNext={vi.fn()} onComplete={vi.fn()} onSkip={vi.fn()} headingRef={{ current: null }} />);
+
+    expect(screen.getByRole("heading", { name: "Remos en anillas" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Push-ups en anillas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remos en anillas: ring row tecnico/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /push-ups en anillas: ring push-up/i })).toBeInTheDocument();
+  });
+
   it("summarizes metadata, equipment, safety and ordered blocks", async () => {
     const onStart = vi.fn();
     render(<SessionStartSummary session={session} definition={definition} onStart={onStart} onBack={vi.fn()} />);

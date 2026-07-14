@@ -8,7 +8,7 @@ const definition: GuidedSessionDefinition = {
   version: 1,
   objective: "Objetivo",
   safetyNote: "Seguridad",
-  blocks: [{ id: "work", phase: "work", title: "Trabajo", instruction: "Hace", steps: ["Hace"], cues: ["Control"], equipment: [], media: [], narrationText: "Hace" }]
+  blocks: [{ id: "work", phase: "work", title: "Trabajo", instruction: "Hace", steps: ["Hace"], cues: ["Control"], equipment: [], media: [], exerciseSections: [], narrationText: "Hace" }]
 };
 const definitions = { w1d1: definition };
 
