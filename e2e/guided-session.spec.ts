@@ -71,6 +71,53 @@ test("pause, reload and resume at the same unresolved block", async ({ page }) =
   await expect(page.locator("h1")).toHaveText(expectedHeading || "");
 });
 
+test("pause dialog actions stay contained and do not overlap at the sm layout", async ({ page }, testInfo) => {
+  if (testInfo.project.name === "desktop") await page.setViewportSize({ width: 700, height: 600 });
+  await openPlan(page);
+  await launchSelected(page);
+  await page.getByRole("button", { name: "Empezar sesión" }).click();
+  await page.getByRole("button", { name: "Pausar o salir" }).click();
+
+  const dialog = page.getByRole("alertdialog", { name: "Pausar sesión" });
+  const footer = dialog.locator('[data-slot="alert-dialog-footer"]');
+  const actions = footer.getByRole("button");
+  await dialog.evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+  });
+  const dialogBounds = await dialog.boundingBox();
+  const footerBounds = await footer.boundingBox();
+
+  expect(dialogBounds).not.toBeNull();
+  expect(footerBounds).not.toBeNull();
+  expect(await actions.count()).toBe(3);
+
+  const actionBounds = await actions.evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const bounds = button.getBoundingClientRect();
+      return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+    }),
+  );
+
+  for (const bounds of actionBounds) {
+    expect(bounds.x).toBeGreaterThanOrEqual(dialogBounds!.x);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(dialogBounds!.x + dialogBounds!.width);
+    expect(bounds.x).toBeGreaterThanOrEqual(footerBounds!.x);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(footerBounds!.x + footerBounds!.width);
+  }
+
+  for (let first = 0; first < actionBounds.length; first += 1) {
+    for (let second = first + 1; second < actionBounds.length; second += 1) {
+      const a = actionBounds[first];
+      const b = actionBounds[second];
+      const overlapX = a.x < b.x + b.width && a.x + a.width > b.x;
+      const overlapY = a.y < b.y + b.height && a.y + a.height > b.y;
+      expect(overlapX && overlapY).toBe(false);
+    }
+  }
+
+  for (const bounds of actionBounds) expect(bounds.height).toBeGreaterThanOrEqual(44);
+});
+
 test("active-session conflict supports cancel and discard", async ({ page }) => {
   await openPlan(page);
   await launchSelected(page);
