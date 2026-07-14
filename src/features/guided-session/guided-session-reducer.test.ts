@@ -45,7 +45,7 @@ describe("guided session reducer", () => {
   });
 
   it("rejects early completion and completes when every block is resolved", () => {
-    let state = { ...emptyState, activeRun: { ...createGuidedRun(definition, "2026-07-14T10:00:00.000Z", "run"), status: "active" as const, startedAt: "2026-07-14T10:00:00.000Z", activeSegmentStartedAt: "2026-07-14T10:00:00.000Z" } };
+    let state: GuidedSessionState = { ...emptyState, activeRun: { ...createGuidedRun(definition, "2026-07-14T10:00:00.000Z", "run"), status: "active" as const, startedAt: "2026-07-14T10:00:00.000Z", activeSegmentStartedAt: "2026-07-14T10:00:00.000Z" } };
     expect(guidedSessionReducer(state, { type: "COMPLETE_RUN", definition, now: "2026-07-14T10:01:00.000Z" })).toEqual(state);
 
     for (const [index, block] of definition.blocks.entries()) {
@@ -56,7 +56,7 @@ describe("guided session reducer", () => {
   });
 
   it("accumulates only active segments across pause and resume", () => {
-    let state = { ...emptyState, activeRun: { ...createGuidedRun(definition, "2026-07-14T10:00:00.000Z", "run"), status: "active" as const, startedAt: "2026-07-14T10:00:00.000Z", activeSegmentStartedAt: "2026-07-14T10:00:00.000Z" } };
+    let state: GuidedSessionState = { ...emptyState, activeRun: { ...createGuidedRun(definition, "2026-07-14T10:00:00.000Z", "run"), status: "active" as const, startedAt: "2026-07-14T10:00:00.000Z", activeSegmentStartedAt: "2026-07-14T10:00:00.000Z" } };
     state = guidedSessionReducer(state, { type: "PAUSE", now: "2026-07-14T10:02:00.000Z" });
     expect(state.activeRun?.accumulatedActiveSeconds).toBe(120);
     expect(elapsedActiveSeconds(state.activeRun!, "2026-07-14T11:00:00.000Z")).toBe(120);

@@ -1,6 +1,6 @@
 import type { GuidedRun, GuidedSessionDefinition, GuidedSessionEvent, GuidedSessionState } from "./guided-session-types";
 
-function runId() {
+function runId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `guided-${Date.now()}`;
 }
 
@@ -14,7 +14,7 @@ export function elapsedActiveSeconds(run: GuidedRun, now: string) {
   return run.accumulatedActiveSeconds + (run.status === "active" ? secondsBetween(run.activeSegmentStartedAt, now) : 0);
 }
 
-export function createGuidedRun(definition: GuidedSessionDefinition, now: string, id = runId()): GuidedRun {
+export function createGuidedRun(definition: GuidedSessionDefinition, now: string, id: string = runId()): GuidedRun {
   return {
     id,
     schemaVersion: 1,

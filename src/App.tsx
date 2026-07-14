@@ -114,6 +114,9 @@ import {
   calculateQuestionnaireCompletion
 } from "@/lib/profile-questionnaire";
 import { cn } from "@/lib/utils";
+import { GuidedSessionFlow } from "@/features/guided-session/GuidedSessionFlow";
+import { guidedSessionDefinitions } from "@/features/guided-session/guided-session-data";
+import { loadGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import {
   defaultState,
   exerciseLibrary,
@@ -1225,6 +1228,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [activeWeek, setActiveWeek] = useState("all");
   const [selectedSessionId, setSelectedSessionId] = useState("w1d1");
+  const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
   const [logForm, setLogForm] = useState(defaultLogValues);
   const [logError, setLogError] = useState("");
   const [videoFile, setVideoFile] = useState(null);
@@ -1269,6 +1273,18 @@ export default function App() {
   const selectedSession = sessionById(selectedSessionId);
   const selectedExercises = getSessionExercises(selectedSession);
   const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
+  const guidedSnapshot = loadGuidedSessionState(localStorage, guidedSessionDefinitions, new Date().toISOString()).state;
+  const activeGuidedRun = guidedSnapshot.activeRun;
+  const guidedCompletedSessionIds = new Set(
+    [...guidedSnapshot.history, ...(activeGuidedRun ? [activeGuidedRun] : [])]
+      .filter((run) => run.status === "completed")
+      .map((run) => run.sessionId)
+  );
+  const selectedGuidedDefinition = guidedSessionDefinitions[selectedSessionId];
+  const selectedGuidedRun = activeGuidedRun?.sessionId === selectedSessionId && activeGuidedRun.status !== "completed" ? activeGuidedRun : null;
+  const guidedActionLabel = selectedGuidedRun
+    ? `Continuar sesión · Bloque ${selectedGuidedRun.currentBlockIndex + 1} de ${selectedGuidedDefinition?.blocks.length || 0}`
+    : "Iniciar sesión";
   const nextSession = useMemo(() => {
     const todayISO = new Date().toISOString().slice(0, 10);
     return (
@@ -1978,7 +1994,7 @@ export default function App() {
                 <ScrollArea className="max-h-[28rem] lg:h-[calc(100vh-13rem)] lg:max-h-none">
                   <div className="space-y-2 pr-3">
                     {plan.map((session, index) => {
-                      const completed = (logsBySession.get(session.id) || []).length > 0;
+                      const completed = (logsBySession.get(session.id) || []).length > 0 || guidedCompletedSessionIds.has(session.id);
                       const selected = session.id === selectedSessionId;
                       const weekActive = activeWeek !== "all" && String(session.week) === activeWeek;
                       const showWeekHeader = index === 0 || plan[index - 1].week !== session.week;
@@ -2048,6 +2064,16 @@ export default function App() {
                         {dateLabel(selectedSession.date)} · {selectedSession.start}-{selectedSession.end} · {selectedSession.phase}
                       </CardDescription>
                     </div>
+                    <Button
+                      type="button"
+                      size="lg"
+                      className="h-11 w-full sm:w-fit"
+                      disabled={!selectedGuidedDefinition?.blocks.length}
+                      onClick={() => setGuidedSessionOpen(true)}
+                    >
+                      <Play className="size-4" />
+                      {guidedActionLabel}
+                    </Button>
                   </div>
                   <div className="grid gap-2 text-sm sm:grid-cols-3 xl:min-w-80">
                     <div className="rounded-lg border border-border/70 bg-background/45 p-3">
@@ -2066,6 +2092,7 @@ export default function App() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-5 p-4 sm:p-6">
+                {!selectedGuidedDefinition?.blocks.length ? <p className="text-sm text-muted-foreground">Esta sesión todavía no tiene guía.</p> : null}
                 <Alert role="note" className="border-border/70 bg-background/45">
                   <Target className="size-4" />
                   <AlertTitle>Objetivo de la sesion</AlertTitle>
@@ -2119,6 +2146,18 @@ export default function App() {
                       </article>
                     ))}
                   </section>
+                </div>
+                <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] z-20 -mx-4 border-t bg-card/95 p-3 backdrop-blur sm:hidden">
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="h-11 w-full"
+                    disabled={!selectedGuidedDefinition?.blocks.length}
+                    onClick={() => setGuidedSessionOpen(true)}
+                  >
+                    <Play className="size-4" />
+                    {guidedActionLabel}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -2716,6 +2755,24 @@ export default function App() {
             onSkip={skipQuestionnaire}
             theme={theme}
             onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+          />
+        ) : null}
+        {guidedSessionOpen ? (
+          <GuidedSessionFlow
+            session={selectedSession}
+            definition={selectedGuidedDefinition}
+            definitions={guidedSessionDefinitions}
+            onCloseToPlan={() => {
+              setActiveTab("plan");
+              setGuidedSessionOpen(false);
+            }}
+            onOpenLog={(sessionId) => {
+              selectSession(sessionId);
+              loadLogForSession(sessionId);
+              setActiveTab("log");
+              setGuidedSessionOpen(false);
+            }}
+            onSelectSession={(sessionId) => selectSession(sessionId)}
           />
         ) : null}
       </div>
