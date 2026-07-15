@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppRoot } from "../../AppRoot";
@@ -27,7 +28,10 @@ function authenticatedClient(session: AuthSession): AuthClient {
 function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepository {
   return {
     ensureProfile,
+    hydrate: vi.fn(async () => ({ facts: [], sessionLogs: [], guided: { schemaVersion: 1, activeRun: null, history: [] }, activePlan: null })),
     submitQuestionnaire: vi.fn(async () => undefined),
+    appendFacts: vi.fn(async () => undefined),
+    saveGuidedState: vi.fn(async () => undefined),
     listActivePlan: vi.fn(async () => null),
     startSessionRun: vi.fn(async () => undefined),
     appendSessionLog: vi.fn(async () => undefined)
@@ -105,5 +109,37 @@ describe("cloud-primary app integration", () => {
     await screen.findByRole("button", { name: "Guardar cuestionario" }).then((button) => button.click());
     await waitFor(() => expect(submitQuestionnaire).toHaveBeenCalledTimes(1));
     expect(submitted).toMatchObject({ version: 2, idempotencyKey: expect.any(String) });
+  });
+
+  it("hydrates facts and activity from cloud state instead of local recovery on reload", async () => {
+    localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify({ invalid: "recovery must not win" }));
+    const hydrate = vi.fn(async () => ({
+      facts: [
+        { id: "fact-1", fact_key: "name", value: "Cloud Mateo", source: { type: "import", field: "name", version: 1 }, created_at: "2026-07-15T00:00:00.000Z" },
+        { id: "fact-2", fact_key: "questionnaireCompleted", value: true, source: { type: "import", field: "questionnaireCompleted", version: 1 }, created_at: "2026-07-15T00:00:00.000Z" }
+      ],
+      sessionLogs: [{ id: "log-1", metrics: { sessionId: "w1d1", attempts: 4, moves: 10, bestLink: 3, footCuts: 0, pullWeight: 0, sleep: 7 }, rpe: 7, pump: 5, pain: 1, energy: 8, body: "cloud", created_at: "2026-07-15T00:00:00.000Z" }],
+      guided: { schemaVersion: 1, activeRun: null, history: [] }, activePlan: { id: "plan-1" }
+    }));
+    const cloud = { ...repository(vi.fn(async () => undefined)), hydrate };
+    render(<App cloudRepository={cloud} cloudVerified cloudHydration={await hydrate()} />);
+    await userEvent.setup().click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
+    expect(await screen.findByText("Cloud Mateo")).toBeInTheDocument();
+  });
+
+  it("sends profile facts and logs to cloud with stable retry keys", async () => {
+    const user = userEvent.setup();
+    const appendFacts = vi.fn(async () => undefined);
+    const appendSessionLog = vi.fn(async () => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendFacts, appendSessionLog };
+    localStorage.setItem("climb4w.state.v1", JSON.stringify({ ...defaultState, profile: { ...defaultState.profile, questionnaireCompleted: true } }));
+    render(<App cloudRepository={cloud} />);
+    await user.click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
+    fireEvent.change(await screen.findByLabelText("Grado actual"), { target: { value: "7c" } });
+    await user.click(screen.getByRole("button", { name: "Guardar objetivos" }));
+    await waitFor(() => expect(appendFacts).toHaveBeenCalled());
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 });

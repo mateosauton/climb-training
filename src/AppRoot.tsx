@@ -6,6 +6,7 @@ import { authRedirectUrl, type AuthConfig } from "./features/auth/auth-config";
 import { AuthGate } from "./features/auth/AuthGate";
 import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import type { CloudRepository } from "./features/cloud/cloud-repository";
+import type { CloudHydration } from "./features/cloud/cloud-types";
 import type { CloudImport } from "./features/cloud/cloud-import";
 
 type AppRootProps = {
@@ -22,6 +23,7 @@ function CloudBootstrap({ user, repository, cloudImport }: { user: AuthUser; rep
   const [attempt, setAttempt] = useState(0);
   const [ready, setReady] = useState(!repository);
   const [error, setError] = useState(false);
+  const [hydration, setHydration] = useState<CloudHydration | null>(null);
 
   useEffect(() => {
     if (!repository) return;
@@ -29,8 +31,11 @@ function CloudBootstrap({ user, repository, cloudImport }: { user: AuthUser; rep
     setReady(false);
     setError(false);
     void repository.ensureProfile().then(async () => {
-      await repository.listActivePlan();
-      if (current) setReady(true);
+      const state = await repository.hydrate();
+      if (current) {
+        setHydration(state);
+        setReady(true);
+      }
     }).catch(() => {
       if (current) setError(true);
     });
@@ -59,6 +64,7 @@ function CloudBootstrap({ user, repository, cloudImport }: { user: AuthUser; rep
       cloudRepository={repository}
       cloudImport={cloudImport}
       cloudVerified={Boolean(repository)}
+      cloudHydration={hydration}
     />
   );
 }

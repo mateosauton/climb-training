@@ -22,8 +22,26 @@ export type SessionRunInput = {
 };
 
 export type SessionLogInput = {
-  runId: string;
-  metrics: SessionLogMetrics;
+  runId?: string;
+  sessionId?: string;
+  idempotencyKey?: string;
+  metrics: SessionLogMetrics & Record<string, JsonValue | undefined>;
+};
+
+export type CloudHydration = {
+  facts: Record<string, JsonValue>[];
+  sessionLogs: Record<string, JsonValue>[];
+  guided: JsonValue;
+  activePlan: ActivePlan | null;
+};
+
+export type FactWrite = {
+  id: string;
+  key: string;
+  value: JsonValue;
+  source: JsonValue;
+  supersedes: string | null;
+  recordedAt: string;
 };
 
 export type SessionLogMetrics = {

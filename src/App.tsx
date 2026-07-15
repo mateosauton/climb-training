@@ -1247,7 +1247,8 @@ export default function App({
   signingOut = false,
   cloudRepository = null,
   cloudImport = null,
-  cloudVerified = false
+  cloudVerified = false,
+  cloudHydration = null
 }) {
   const [initialUserLoad] = useState(() => {
     const loaded = loadUserData(localStorage, {
@@ -1259,11 +1260,40 @@ export default function App({
     const canonical = cloudVerified
       ? migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: emptyGuidedSessionState(), now: new Date().toISOString(), makeId })
       : loaded.envelope;
-    const envelope = activateAuthenticatedUser(canonical, authUser, { now: new Date().toISOString(), makeId });
+    let envelope = activateAuthenticatedUser(canonical, authUser, { now: new Date().toISOString(), makeId });
     let warning = loaded.warning;
     if (loaded.canPersist && !cloudVerified) {
       const saved = saveUserData(localStorage, envelope);
       if (saved.ok === false) warning = `No pudimos guardar los datos locales: ${saved.error}`;
+    }
+    if (cloudHydration) {
+      const active = envelope.users[envelope.activeUserId];
+      const facts = (cloudHydration.facts || []).map((fact) => ({
+        id: fact.id,
+        userId: active.identity.id,
+        category: fact.source?.category || "preference",
+        key: fact.fact_key || fact.key,
+        value: fact.value,
+        unit: fact.source?.unit || null,
+        recordedAt: fact.created_at || fact.recordedAt,
+        source: fact.source || { type: "import", field: fact.fact_key || fact.key, version: 1 },
+        supersedes: fact.supersedes_id || fact.supersedes || null
+      }));
+      const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
+        id: log.id,
+        sessionId: log.metrics?.sessionId || log.session_id || "w1d1",
+        createdAt: log.created_at || log.createdAt,
+        notes: log.body || log.metrics?.notes || "",
+        ...log.metrics,
+        rpe: log.rpe ?? log.metrics?.rpe ?? 0,
+        pump: log.pump ?? log.metrics?.pump ?? 0,
+        pain: log.pain ?? log.metrics?.pain ?? 0,
+        energy: log.energy ?? log.metrics?.energy ?? 0
+      }));
+      envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: {
+        ...active, facts, sessionLogs,
+        guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
+      } } };
     }
     return { ...loaded, envelope, recoveryEnvelope: loaded.envelope, warning };
   });
@@ -1291,6 +1321,9 @@ export default function App({
   const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
   const pendingQuestionnaire = useRef(null);
+  const pendingFacts = useRef([]);
+  const pendingLog = useRef(null);
+  const pendingGuided = useRef(null);
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
@@ -1500,23 +1533,12 @@ export default function App({
       return current.users[current.activeUserId].guidedSessions;
     },
     replaceGuidedSessions: (guidedSessions) => {
-      setUserData((current) => {
-        const userId = current.activeUserId;
-        const user = current.users[userId];
-        const next = {
-          ...current,
-          users: {
-            ...current.users,
-            [userId]: {
-              ...user,
-              identity: { ...user.identity, updatedAt: new Date().toISOString() },
-              guidedSessions
-            }
-          }
-        };
-        userDataRef.current = next;
-        return next;
-      });
+      const persisted = persistActiveUser((user) => ({
+        ...user,
+        identity: { ...user.identity, updatedAt: new Date().toISOString() },
+        guidedSessions
+      }));
+      if (persisted) void saveGuidedToCloud(guidedSessions);
     }
   }), []);
 
@@ -1537,12 +1559,10 @@ export default function App({
     const userId = current.activeUserId;
     const nextUser = update(current.users[userId]);
     const next = nextUser === current.users[userId] ? current : { ...current, users: { ...current.users, [userId]: nextUser } };
-    if (!cloudVerified) {
-      const result = persistRecoveryBeforeCloudEffect(localStorage, next);
-      if (!result.ok) {
-        setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
-        return false;
-      }
+    const result = persistRecoveryBeforeCloudEffect(localStorage, next);
+    if (!result.ok) {
+      setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
+      return false;
     }
     userDataRef.current = next;
     setUserData(next);
@@ -1574,6 +1594,29 @@ export default function App({
     }
   }
 
+  async function appendFactsToCloud(facts) {
+    if (!cloudRepository || !facts.length) return;
+    pendingFacts.current = facts;
+    try {
+      await cloudRepository.appendFacts(facts);
+      pendingFacts.current = [];
+    } catch {
+      setUserDataWarning("No pudimos sincronizar tu perfil. Tus cambios quedan guardados para reintentar.");
+    }
+  }
+
+  async function saveGuidedToCloud(state) {
+    if (!cloudRepository) return;
+    const pending = pendingGuided.current || { state, idempotencyKey: makeId() };
+    pendingGuided.current = pending;
+    try {
+      await cloudRepository.saveGuidedState(pending.state, pending.idempotencyKey);
+      pendingGuided.current = null;
+    } catch {
+      setUserDataWarning("No pudimos sincronizar la sesión guiada. Tu progreso queda guardado para reintentar.");
+    }
+  }
+
   function handleCalendarDate(date) {
     if (!date) return;
     const isoDate = toIsoDate(date);
@@ -1599,13 +1642,16 @@ export default function App({
       focus: field("focus", state.goals.focus),
       ...Object.fromEntries(profileFields.map((name) => [name, field(name, state.profile[name])]))
     };
+    let appended = [];
     updateActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "profile-form", version: 1 }, now, makeId);
+      appended = next.facts.slice(current.facts.length);
       return {
         ...next,
         identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now }
       };
     });
+    void appendFactsToCloud(appended);
   }
 
   function saveQuestionnaire(payload) {
@@ -1623,6 +1669,7 @@ export default function App({
     };
     const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      void appendFactsToCloud(next.facts.slice(current.facts.length));
       return { ...next, identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now } };
     });
     if (!recoveryPersisted) return;
@@ -1645,7 +1692,11 @@ export default function App({
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
     };
-    const recoveryPersisted = persistActiveUser((current) => appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId));
+    const recoveryPersisted = persistActiveUser((current) => {
+      const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      void appendFactsToCloud(next.facts.slice(current.facts.length));
+      return next;
+    });
     if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
     if (cloudRepository) {
@@ -1710,7 +1761,14 @@ export default function App({
       notes: logForm.notes,
       ...values
     };
-    updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
+    if (!persistActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }))) return;
+    if (cloudRepository) {
+      const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
+      pendingLog.current = submission;
+      void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
+        setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
+      });
+    }
     setLogError("");
   }
 

@@ -49,6 +49,33 @@ function createFakeClient() {
 }
 
 describe("cloud repository", () => {
+  it("hydrates cloud facts, activity, guided state, and the active plan on reload", async () => {
+    const fake = createFakeClient();
+    fake.rpc.mockResolvedValueOnce({ data: {
+      facts: [{ id: "fact-1", fact_key: "name", value: "Mateo" }],
+      sessionLogs: [{ id: "log-1", metrics: { attempts: 4 } }],
+      guided: { schemaVersion: 1, activeRun: null, history: [] },
+      activePlan: { id: "plan-1" }
+    }, error: null });
+
+    await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
+      facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" }
+    });
+  });
+
+  it("uses caller-stable IDs when retrying facts, logs, and guided state", async () => {
+    const fake = createFakeClient();
+    const repository = createCloudRepository(fake.client);
+    await repository.appendFacts([{ id: "00000000-0000-4000-8000-000000000001", key: "name", value: "Mateo", source: { type: "profile-form", field: "name", version: 1 }, supersedes: null, recordedAt: "2026-07-15T00:00:00.000Z" }]);
+    await repository.appendSessionLog({ idempotencyKey: "00000000-0000-4000-8000-000000000002", sessionId: "w1d1", metrics: { attempts: 4, notes: "good" } });
+    await repository.saveGuidedState({ schemaVersion: 1, activeRun: null, history: [] }, "00000000-0000-4000-8000-000000000003");
+
+    expect(fake.calls.map(({ table, operation, options }) => ({ table, operation, options }))).toEqual([
+      { table: "athlete_facts", operation: "upsert", options: { onConflict: "id", ignoreDuplicates: true } },
+      { table: "session_logs", operation: "upsert", options: { onConflict: "athlete_id,idempotency_key", ignoreDuplicates: true } },
+      { table: "athlete_guided_states", operation: "upsert", options: { onConflict: "athlete_id", ignoreDuplicates: false } }
+    ]);
+  });
   it("uses the authenticated identity for all athlete writes", async () => {
     const fake = createFakeClient();
     const repository = createCloudRepository(fake.client, () => "2026-07-15T12:00:00.000Z");
