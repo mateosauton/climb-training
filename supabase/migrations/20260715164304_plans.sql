@@ -1,5 +1,5 @@
 create table public.exercise_catalog (
-  id uuid primary key default gen_random_uuid(),
+  id uuid not null default gen_random_uuid(),
   content_version integer not null check (content_version > 0),
   title text not null check (char_length(title) > 0),
   instructions text not null check (char_length(instructions) > 0),
@@ -13,7 +13,7 @@ create table public.exercise_catalog (
   retired_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (id, content_version),
+  primary key (id, content_version),
   check (retired_at is null or published_at is not null)
 );
 
@@ -44,6 +44,30 @@ create table private.plan_generation_jobs (
 create index plan_generation_jobs_athlete_created_at_idx
   on private.plan_generation_jobs (athlete_id, created_at desc);
 
+create function private.validate_plan_generation_job_questionnaire_athlete()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1
+    from public.questionnaire_submissions q
+    where q.id = new.questionnaire_id
+      and q.athlete_id = new.athlete_id
+  ) then
+    raise exception 'questionnaire_id must reference a questionnaire for the same athlete'
+      using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger validate_plan_generation_job_questionnaire_athlete
+  before insert or update on private.plan_generation_jobs
+  for each row execute function private.validate_plan_generation_job_questionnaire_athlete();
+
 create table public.training_plans (
   id uuid primary key default gen_random_uuid(),
   athlete_id uuid not null references auth.users(id) on delete cascade,
@@ -68,6 +92,51 @@ create table public.training_plans (
 create unique index training_plans_one_active_per_athlete_idx
   on public.training_plans (athlete_id)
   where status = 'active';
+
+create function private.validate_training_plan_source_athlete()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  generation_job_questionnaire_id uuid;
+begin
+  if new.source_questionnaire_id is not null and not exists (
+    select 1
+    from public.questionnaire_submissions q
+    where q.id = new.source_questionnaire_id
+      and q.athlete_id = new.athlete_id
+  ) then
+    raise exception 'source_questionnaire_id must reference a questionnaire for the same athlete'
+      using errcode = '23514';
+  end if;
+
+  if new.source_generation_job_id is not null then
+    select j.questionnaire_id
+      into generation_job_questionnaire_id
+      from private.plan_generation_jobs j
+      where j.id = new.source_generation_job_id
+        and j.athlete_id = new.athlete_id;
+
+    if generation_job_questionnaire_id is null then
+      raise exception 'source_generation_job_id must reference a generation job for the same athlete'
+        using errcode = '23514';
+    end if;
+
+    if new.source_questionnaire_id is not null
+      and generation_job_questionnaire_id <> new.source_questionnaire_id then
+      raise exception 'source questionnaire must match the generation job questionnaire'
+        using errcode = '23514';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger validate_training_plan_source_athlete
+  before insert or update on public.training_plans
+  for each row execute function private.validate_training_plan_source_athlete();
 
 create table public.plan_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -141,6 +210,23 @@ as $$
 declare
   published boolean;
 begin
+  if tg_op = 'INSERT' and tg_table_name <> 'training_plans' then
+    select p.published_at is not null
+      into published
+      from public.training_plans p
+      left join public.plan_sessions s on s.plan_id = p.id
+      left join public.plan_blocks b on b.session_id = s.id
+      where (tg_table_name = 'plan_sessions' and p.id = new.plan_id)
+         or (tg_table_name = 'plan_blocks' and s.id = new.session_id)
+         or (tg_table_name = 'plan_block_exercises' and b.id = new.block_id);
+
+    if coalesce(published, false) then
+      raise exception 'published plan content is immutable' using errcode = '55000';
+    end if;
+
+    return new;
+  end if;
+
   if tg_table_name = 'training_plans' then
     if old.published_at is not null
       and not (
@@ -181,15 +267,15 @@ create trigger reject_published_training_plan_mutation
   for each row execute function private.reject_published_plan_mutation();
 
 create trigger reject_published_plan_session_mutation
-  before update or delete on public.plan_sessions
+  before insert or update or delete on public.plan_sessions
   for each row execute function private.reject_published_plan_mutation();
 
 create trigger reject_published_plan_block_mutation
-  before update or delete on public.plan_blocks
+  before insert or update or delete on public.plan_blocks
   for each row execute function private.reject_published_plan_mutation();
 
 create trigger reject_published_plan_block_exercise_mutation
-  before update or delete on public.plan_block_exercises
+  before insert or update or delete on public.plan_block_exercises
   for each row execute function private.reject_published_plan_mutation();
 
 create function private.publish_training_plan(
@@ -271,6 +357,13 @@ alter table private.plan_generation_jobs enable row level security;
 revoke all on schema private from public, anon, authenticated;
 revoke all on all tables in schema private from public, anon, authenticated;
 revoke all on all functions in schema private from public, anon, authenticated;
+revoke all on schema private from service_role;
+revoke all on all tables in schema private from service_role;
+revoke all on all functions in schema private from service_role;
+
+grant usage on schema private to service_role;
+grant select, insert, update, delete on private.plan_generation_jobs to service_role;
+grant execute on function private.publish_training_plan(uuid, uuid, uuid, text, jsonb, text, text, text, text, integer) to service_role;
 
 grant select on public.exercise_catalog to authenticated;
 grant select on public.training_plans to authenticated;
@@ -283,6 +376,7 @@ revoke insert, update, delete on public.training_plans from authenticated;
 revoke insert, update, delete on public.plan_sessions from authenticated;
 revoke insert, update, delete on public.plan_blocks from authenticated;
 revoke insert, update, delete on public.plan_block_exercises from authenticated;
+revoke all on public.exercise_catalog, public.training_plans, public.plan_sessions, public.plan_blocks, public.plan_block_exercises from anon;
 
 create policy "athletes read published exercises"
   on public.exercise_catalog for select to authenticated
