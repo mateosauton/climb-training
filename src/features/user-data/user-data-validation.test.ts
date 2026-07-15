@@ -30,6 +30,7 @@ describe("user data envelope validation", () => {
     ["unknown key", (value: any) => { value.users.u1.facts[0].key = "unknown"; }],
     ["invalid value", (value: any) => { value.users.u1.facts[0].value = ["ok", 2]; }],
     ["cross-user fact", (value: any) => { value.users.u1.facts[0].userId = "u2"; }],
+    ["invalid video advice", (value: any) => { value.users.u1.videoAnalyses = [{ id: "video", sessionId: "w1d1", createdAt: at, fileName: "x.mp4", duration: 1, size: 1, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [{ title: "Missing body" }] }]; }],
     ["invalid guided state", (value: any) => { value.users.u1.guidedSessions = { schemaVersion: 1, activeRun: { id: "bad" }, history: [] }; }]
   ])("rejects %s", (_name, mutate) => {
     const value: any = structuredClone(envelope());
@@ -72,7 +73,7 @@ describe("user data envelope validation", () => {
   it("rejects event IDs reused across collections", () => {
     const value = envelope();
     value.users.u1.sessionLogs = [{ id: "event", sessionId: "w1d1", createdAt: at, notes: "", rpe: 1, pump: 0, pain: 0, attempts: 0, moves: 0, bestLink: 0, footCuts: 0, pullWeight: 0, sleep: 0, energy: 0 }];
-    value.users.u1.videoAnalyses = [{ id: "event", sessionId: "w1d1", createdAt: at, fileName: "x.mp4", duration: 1, size: 1, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0 }];
+    value.users.u1.videoAnalyses = [{ id: "event", sessionId: "w1d1", createdAt: at, fileName: "x.mp4", duration: 1, size: 1, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [] }];
     expect(validateUserDataEnvelope(value)).toBeNull();
   });
 

@@ -49,7 +49,10 @@ export function migrateLegacyUserData(options: {
         identity: { id: userId, displayName: tracker.profile.name || "Usuario local", createdAt: now, updatedAt: now },
         facts,
         sessionLogs: clone(tracker.logs),
-        videoAnalyses: clone(tracker.videos),
+        videoAnalyses: tracker.videos.map((video) => ({
+          ...clone(video),
+          advice: Array.isArray(video.advice) ? clone(video.advice) : []
+        })),
         guidedSessions: clone(guided)
       }
     },

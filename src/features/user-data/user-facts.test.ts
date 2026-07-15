@@ -125,7 +125,7 @@ describe("projectTrackerState", () => {
     };
     const video: VideoAnalysis = {
       id: "video-1", sessionId: "w1d1", createdAt: now, fileName: "send.mp4", duration: 12,
-      size: 100, notes: "", footCuts: 1, swing: 2, hips: 3, shoulder: 4, breath: 5, reading: 6
+      size: 100, notes: "", footCuts: 1, swing: 2, hips: 3, shoulder: 4, breath: 5, reading: 6, advice: []
     };
     const user = record("user-a", [
       fact({ id: "name-old", value: "Mateo" }),

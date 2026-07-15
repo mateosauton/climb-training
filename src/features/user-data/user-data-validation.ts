@@ -34,9 +34,11 @@ function isSessionLog(value: unknown): value is SessionLog {
 }
 
 function isVideoAnalysis(value: unknown): value is VideoAnalysis {
-  if (!record(value) || !exact(value, ["id", "sessionId", "createdAt", "fileName", "duration", "size", "notes", "footCuts", "swing", "hips", "shoulder", "breath", "reading"])) return false;
+  if (!record(value) || !exact(value, ["id", "sessionId", "createdAt", "fileName", "duration", "size", "notes", "footCuts", "swing", "hips", "shoulder", "breath", "reading", "advice"])) return false;
   return [value.id, value.sessionId, value.createdAt, value.fileName, value.notes].every((item) => typeof item === "string")
-    && [value.duration, value.size, value.footCuts, value.swing, value.hips, value.shoulder, value.breath, value.reading].every(finite);
+    && [value.duration, value.size, value.footCuts, value.swing, value.hips, value.shoulder, value.breath, value.reading].every(finite)
+    && Array.isArray(value.advice)
+    && value.advice.every((item) => record(item) && exact(item, ["title", "body"]) && typeof item.title === "string" && typeof item.body === "string");
 }
 
 function fieldAcceptsValue(key: string, value: unknown): boolean {
