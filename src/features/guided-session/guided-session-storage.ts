@@ -15,28 +15,41 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
+function hasExactKeys(value: Record<string, unknown>, keys: string[]) {
+  return Object.keys(value).length === keys.length
+    && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
 function isGuidedRun(value: unknown): value is GuidedRun {
   if (!value || typeof value !== "object") return false;
   const run = value as Record<string, unknown>;
-  return run.schemaVersion === 1
+  return hasExactKeys(run, ["id", "schemaVersion", "definitionVersion", "sessionId", "status", "currentBlockIndex", "completedBlockIds", "skippedBlockIds", "startedAt", "completedAt", "activeSegmentStartedAt", "accumulatedActiveSeconds", "updatedAt"])
+    && run.schemaVersion === 1
     && typeof run.id === "string"
-    && typeof run.definitionVersion === "number"
+    && Number.isInteger(run.definitionVersion)
     && typeof run.sessionId === "string"
     && ["summary", "active", "paused", "completed"].includes(String(run.status))
-    && typeof run.currentBlockIndex === "number"
+    && Number.isInteger(run.currentBlockIndex)
+    && Number(run.currentBlockIndex) >= 0
     && isStringArray(run.completedBlockIds)
+    && new Set(run.completedBlockIds).size === run.completedBlockIds.length
     && isStringArray(run.skippedBlockIds)
+    && new Set(run.skippedBlockIds).size === run.skippedBlockIds.length
+    && run.completedBlockIds.every((id) => !(run.skippedBlockIds as string[]).includes(id))
     && isNullableString(run.startedAt)
     && isNullableString(run.completedAt)
     && isNullableString(run.activeSegmentStartedAt)
     && typeof run.accumulatedActiveSeconds === "number"
+    && Number.isFinite(run.accumulatedActiveSeconds)
+    && run.accumulatedActiveSeconds >= 0
     && typeof run.updatedAt === "string";
 }
 
 export function isGuidedSessionState(value: unknown): value is GuidedSessionState {
   if (!value || typeof value !== "object") return false;
   const state = value as Record<string, unknown>;
-  return state.schemaVersion === 1
+  return hasExactKeys(state, ["schemaVersion", "activeRun", "history"])
+    && state.schemaVersion === 1
     && (state.activeRun === null || isGuidedRun(state.activeRun))
     && Array.isArray(state.history)
     && state.history.every(isGuidedRun);

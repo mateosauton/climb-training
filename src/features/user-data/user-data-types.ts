@@ -69,5 +69,5 @@ export type UserDataLoadResult = {
   envelope: UserDataEnvelope;
   warning: string | null;
   migrated: boolean;
+  canPersist: boolean;
 };
-

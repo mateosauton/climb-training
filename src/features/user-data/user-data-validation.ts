@@ -100,7 +100,8 @@ function parseUser(value: unknown, userId: string): UserRecord | null {
   if (!Array.isArray(value.videoAnalyses) || !value.videoAnalyses.every(isVideoAnalysis)) return null;
   if (!isGuidedSessionState(value.guidedSessions)) return null;
   const user = value as unknown as UserRecord;
-  if (!validRelationships(userId, user) || !noDuplicateIds(user.sessionLogs) || !noDuplicateIds(user.videoAnalyses) || !noDuplicateIds(guidedRuns(user))) return null;
+  const events = [...user.sessionLogs, ...user.videoAnalyses, ...guidedRuns(user)];
+  if (!validRelationships(userId, user) || !noDuplicateIds(events)) return null;
   return user;
 }
 

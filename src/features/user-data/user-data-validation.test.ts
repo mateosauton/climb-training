@@ -69,10 +69,31 @@ describe("user data envelope validation", () => {
     expect(validateUserDataEnvelope(value)).toBeNull();
   });
 
+  it("rejects event IDs reused across collections", () => {
+    const value = envelope();
+    value.users.u1.sessionLogs = [{ id: "event", sessionId: "w1d1", createdAt: at, notes: "", rpe: 1, pump: 0, pain: 0, attempts: 0, moves: 0, bestLink: 0, footCuts: 0, pullWeight: 0, sleep: 0, energy: 0 }];
+    value.users.u1.videoAnalyses = [{ id: "event", sessionId: "w1d1", createdAt: at, fileName: "x.mp4", duration: 1, size: 1, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0 }];
+    expect(validateUserDataEnvelope(value)).toBeNull();
+  });
+
   it("rejects fact values that disagree with the registered field type", () => {
     const value = envelope();
     value.users.u1.facts[0] = { ...fact("u1", "done", "questionnaireCompleted"), value: "yes" };
     expect(defaultState.profile.questionnaireCompleted).toBe(false);
     expect(validateUserDataEnvelope(value)).toBeNull();
+  });
+
+  it("strictly rejects extra and non-finite guided-run fields", () => {
+    const run = {
+      id: "run", schemaVersion: 1, definitionVersion: 1, sessionId: "w1d1", status: "paused", currentBlockIndex: 0,
+      completedBlockIds: [], skippedBlockIds: [], startedAt: at, completedAt: null, activeSegmentStartedAt: null,
+      accumulatedActiveSeconds: 1, updatedAt: at
+    };
+    const extra: any = structuredClone(envelope());
+    extra.users.u1.guidedSessions.activeRun = { ...run, privateBlobUrl: "blob:secret" };
+    expect(validateUserDataEnvelope(extra)).toBeNull();
+    const invalidNumber: any = structuredClone(envelope());
+    invalidNumber.users.u1.guidedSessions.activeRun = { ...run, currentBlockIndex: Number.NaN };
+    expect(validateUserDataEnvelope(invalidNumber)).toBeNull();
   });
 });
