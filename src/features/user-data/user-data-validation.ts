@@ -34,11 +34,13 @@ function isSessionLog(value: unknown): value is SessionLog {
 }
 
 function isVideoAnalysis(value: unknown): value is VideoAnalysis {
-  if (!record(value) || !exact(value, ["id", "sessionId", "createdAt", "fileName", "duration", "size", "notes", "footCuts", "swing", "hips", "shoulder", "breath", "reading", "advice"])) return false;
+  const keys = ["id", "sessionId", "createdAt", "fileName", "duration", "size", "notes", "footCuts", "swing", "hips", "shoulder", "breath", "reading", "advice"];
+  if (!record(value) || !keys.every((key) => Object.prototype.hasOwnProperty.call(value, key)) || !Object.keys(value).every((key) => keys.includes(key) || key === "cloud")) return false;
   return [value.id, value.sessionId, value.createdAt, value.fileName, value.notes].every((item) => typeof item === "string")
     && [value.duration, value.size, value.footCuts, value.swing, value.hips, value.shoulder, value.breath, value.reading].every(finite)
     && Array.isArray(value.advice)
-    && value.advice.every((item) => record(item) && exact(item, ["title", "body"]) && typeof item.title === "string" && typeof item.body === "string");
+    && value.advice.every((item) => record(item) && exact(item, ["title", "body"]) && typeof item.title === "string" && typeof item.body === "string")
+    && (value.cloud === undefined || (record(value.cloud) && exact(value.cloud, ["id", "path", "uploadStatus"]) && typeof value.cloud.id === "string" && typeof value.cloud.path === "string" && ["pending", "uploaded", "analysis_pending"].includes(String(value.cloud.uploadStatus))));
 }
 
 function fieldAcceptsValue(key: string, value: unknown): boolean {

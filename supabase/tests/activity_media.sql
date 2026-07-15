@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(26);
+select plan(30);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -137,6 +137,29 @@ select lives_ok(
   $$insert into public.video_assets (id, athlete_id, object_path, checksum, mime_type, byte_size, duration_seconds, upload_status, processing_status, run_id)
     values ('00000000-0000-0000-0000-000000000351', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000301/attempt.mp4', repeat('a', 64), 'video/mp4', 100, 12, 'uploaded', 'pending', '00000000-0000-0000-0000-000000000341')$$,
   'athlete creates video metadata for their own run'
+);
+
+select lives_ok(
+  $$select public.append_video_analysis('00000000-0000-0000-0000-000000000351', 'completed', '{"foot_cuts":2}'::jsonb, '{"recommendations":[]}'::jsonb)$$,
+  'athlete appends the first video analysis through the JWT-bound RPC'
+);
+
+select lives_ok(
+  $$select public.append_video_analysis('00000000-0000-0000-0000-000000000351', 'completed', '{"foot_cuts":3}'::jsonb, '{"recommendations":[]}'::jsonb)$$,
+  'athlete can append a later video analysis version'
+);
+
+select is(
+  (select array_agg(analysis_version order by analysis_version) from public.video_analyses where video_asset_id = '00000000-0000-0000-0000-000000000351'),
+  array[1, 2],
+  'analysis versions are immutable and incremented by the server'
+);
+
+select throws_ok(
+  $$select public.append_video_analysis('00000000-0000-0000-0000-000000000352', 'completed', '{}'::jsonb, '{}'::jsonb)$$,
+  'P0002',
+  'video asset not found',
+  'analysis RPC cannot append to an asset the athlete does not own'
 );
 
 select throws_ok(

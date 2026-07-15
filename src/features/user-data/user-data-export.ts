@@ -37,7 +37,8 @@ function cleanUser(user: UserRecord): UserRecord {
     videoAnalyses: user.videoAnalyses.map((video) => ({
       id: video.id, sessionId: video.sessionId, createdAt: video.createdAt, fileName: video.fileName, duration: video.duration, size: video.size,
       notes: video.notes, footCuts: video.footCuts, swing: video.swing, hips: video.hips, shoulder: video.shoulder, breath: video.breath, reading: video.reading,
-      advice: Array.isArray(video.advice) ? video.advice.map(({ title, body }) => ({ title, body })) : []
+      advice: Array.isArray(video.advice) ? video.advice.map(({ title, body }) => ({ title, body })) : [],
+      ...(video.cloud ? { cloud: { ...video.cloud } } : {})
     })),
     guidedSessions: guidedState(user.guidedSessions)
   };

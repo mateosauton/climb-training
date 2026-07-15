@@ -117,6 +117,11 @@ export type VideoAnalysis = {
   breath: number;
   reading: number;
   advice: VideoAdvice[];
+  cloud?: {
+    id: string;
+    path: string;
+    uploadStatus: "pending" | "uploaded" | "analysis_pending";
+  };
 };
 
 export type LogNumberKey = keyof typeof logNumberLimits;
