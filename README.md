@@ -48,6 +48,13 @@ La app usa Supabase Auth para registrar usuarios, confirmar su correo, iniciar s
 
 CI usa un adaptador determinista y nunca necesita credenciales reales ni enviar correos.
 
+## Operación de Supabase
+
+La guía de despliegue, migraciones, secretos de Edge Functions, bucket privado,
+recuperación de importaciones y verificación está en
+[docs/supabase-operations.md](docs/supabase-operations.md). No copies secretos
+ni contraseñas en archivos versionados, salidas de CI o tickets.
+
 ## Perfil y datos
 
 - El JSON canonico por usuario se guarda en `climb4w.users.v3` dentro de `localStorage`; `climb4w.users.v2` se conserva como fuente de recuperacion tras migrar.
