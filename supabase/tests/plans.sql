@@ -58,9 +58,9 @@ insert into public.exercise_catalog (
   'Stop for pain.'
 );
 
-insert into public.questionnaire_submissions (id, athlete_id, answers) values
-  ('00000000-0000-0000-0000-0000000000d5', '00000000-0000-0000-0000-0000000000c3', '{"goal":"finger strength"}'::jsonb),
-  ('00000000-0000-0000-0000-0000000000d6', '00000000-0000-0000-0000-0000000000d4', '{"goal":"endurance"}'::jsonb);
+insert into public.questionnaire_submissions (id, athlete_id, answers, idempotency_key) values
+  ('00000000-0000-0000-0000-0000000000d5', '00000000-0000-0000-0000-0000000000c3', '{"goal":"finger strength"}'::jsonb, 'plan-fixture-a'),
+  ('00000000-0000-0000-0000-0000000000d6', '00000000-0000-0000-0000-0000000000d4', '{"goal":"endurance"}'::jsonb, 'plan-fixture-b');
 
 insert into private.plan_generation_jobs (
   id, athlete_id, questionnaire_id, status, idempotency_key, input_schema_version, input_snapshot

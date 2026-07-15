@@ -7,6 +7,7 @@ export type QuestionnaireSubmissionInput = {
 };
 
 export type SessionRunInput = {
+  planId: string;
   planSessionId: string;
 };
 

@@ -24,6 +24,10 @@ export interface CloudQueryClient {
   rpc(name: "ensure_athlete_profile"): PromiseLike<CloudResult<unknown>>;
   from(table: "questionnaire_submissions" | "session_runs" | "session_logs"): {
     insert(values: Record<string, JsonValue>): PromiseLike<CloudResult<unknown>>;
+    upsert(
+      values: Record<string, JsonValue>,
+      options: { onConflict: "athlete_id,idempotency_key"; ignoreDuplicates: true }
+    ): PromiseLike<CloudResult<unknown>>;
   };
   from(table: "training_plans"): {
     select(columns: string): CloudSelectQuery;
@@ -61,10 +65,14 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
     },
     async submitQuestionnaire({ version, answers, idempotencyKey }) {
       const id = await athleteId(client);
-      await requireSuccess(client.from("questionnaire_submissions").insert({
+      await requireSuccess(client.from("questionnaire_submissions").upsert({
         athlete_id: id,
         answers,
-        source: { version, idempotency_key: idempotencyKey }
+        idempotency_key: idempotencyKey,
+        source: { version }
+      }, {
+        onConflict: "athlete_id,idempotency_key",
+        ignoreDuplicates: true
       }));
     },
     async listActivePlan() {
@@ -72,13 +80,14 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       if (error) throw failure("unavailable");
       return data;
     },
-    async startSessionRun({ planSessionId }) {
+    async startSessionRun({ planId, planSessionId }) {
       const id = await athleteId(client);
       const timestamp = now();
       await requireSuccess(client.from("session_runs").insert({
         athlete_id: id,
+        plan_id: planId,
         plan_session_id: planSessionId,
-        status: "started",
+        status: "in_progress",
         started_at: timestamp,
         last_progress_at: timestamp
       }));

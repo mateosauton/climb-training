@@ -33,45 +33,45 @@ where id in ('00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-00
 insert into storage.objects (bucket_id, name)
 values ('climbing-videos', '00000000-0000-0000-0000-000000000302/private.mp4');
 
-insert into public.session_runs (id, athlete_id, plan_session_id, status)
-values ('00000000-0000-0000-0000-000000000342', '00000000-0000-0000-0000-000000000302', '00000000-0000-0000-0000-000000000322', 'completed');
+insert into public.session_runs (id, athlete_id, plan_id, plan_session_id, status)
+values ('00000000-0000-0000-0000-000000000342', '00000000-0000-0000-0000-000000000302', '00000000-0000-0000-0000-000000000312', '00000000-0000-0000-0000-000000000322', 'completed');
 
 set local role authenticated;
 set local "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000301';
 
 select lives_ok(
-  $$insert into public.session_runs (id, athlete_id, plan_session_id, status, rpe, pump, pain, energy, duration_seconds)
-    values ('00000000-0000-0000-0000-000000000341', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000321', 'completed', 7, 6, 1, 8, 1800)$$,
+  $$insert into public.session_runs (id, athlete_id, plan_id, plan_session_id, status, rpe, pump, pain, energy, duration_seconds)
+    values ('00000000-0000-0000-0000-000000000341', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-000000000321', 'completed', 7, 6, 1, 8, 1800)$$,
   'athlete creates a run for their own scheduled session'
 );
 
 select throws_ok(
-  $$insert into public.session_runs (athlete_id, plan_session_id, status)
-    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000322', 'completed')$$,
+  $$insert into public.session_runs (athlete_id, plan_id, plan_session_id, status)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-000000000322', 'completed')$$,
   '23514',
-  'plan_session_id must belong to the same athlete',
+  'plan_session_id must belong to the specified plan and athlete',
   'athlete cannot create a run against another athlete plan and session'
 );
 
 select throws_ok(
-  $$insert into public.session_runs (athlete_id, plan_session_id, status, rpe)
-    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000321', 'completed', 11)$$,
+  $$insert into public.session_runs (athlete_id, plan_id, plan_session_id, status, rpe)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-000000000321', 'completed', 11)$$,
   '23514',
   null,
   'run rejects an RPE above the valid range'
 );
 
 select throws_ok(
-  $$insert into public.session_runs (athlete_id, plan_session_id, status, duration_seconds)
-    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000321', 'completed', -1)$$,
+  $$insert into public.session_runs (athlete_id, plan_id, plan_session_id, status, duration_seconds)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-000000000321', 'completed', -1)$$,
   '23514',
   null,
   'run rejects a negative duration'
 );
 
 select throws_ok(
-  $$insert into public.session_runs (athlete_id, plan_session_id, status, pump)
-    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000321', 'completed', 11)$$,
+  $$insert into public.session_runs (athlete_id, plan_id, plan_session_id, status, pump)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-000000000321', 'completed', 11)$$,
   '23514',
   null,
   'run rejects pump outside the valid range'
