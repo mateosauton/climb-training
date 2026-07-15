@@ -26,3 +26,8 @@
 - Empty-video imports now transition directly to `completed`, allowing the existing client completion marker to persist immediately.
 - Video completion uses the established `{athlete}/{videoId}/original.<extension>` path and hashes the downloaded private object server-side; request checksums are ignored.
 - Added SQL coverage for atomic retry behavior, supersession mapping, and persisted guided-run mapping.
+
+## Review follow-up: validation boundary
+
+- Shared the schema-3 validator between browser recovery validation and the authenticated Edge Function, including optional `video.cloud` metadata.
+- Raw Edge payloads now reject invalid fact category, value, source, duplicate ID, and supersedes relationships before receipt or RPC work begins.
