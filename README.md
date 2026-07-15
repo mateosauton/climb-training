@@ -47,7 +47,7 @@ La verificacion final del proveedor requiere iniciar sesion con una cuenta Apple
 
 ## Perfil y datos
 
-- El JSON canonico por usuario se guarda en `climb4w.users.v2` dentro de `localStorage`.
+- El JSON canonico por usuario se guarda en `climb4w.users.v3` dentro de `localStorage`; `climb4w.users.v2` se conserva como fuente de recuperacion tras migrar.
 - Los cambios de perfil se anexan como hechos inmutables con origen e historial de reemplazo; logs, analisis y sesiones guiadas quedan separados por usuario.
 - Los videos subidos se guardan en IndexedDB y no se incrustan en la exportacion JSON.
 - Las claves antiguas `climb4w.state.v1` y de sesiones guiadas se conservan como copia de recuperacion luego de migrar.
