@@ -32,7 +32,7 @@ describe("user data storage", () => {
     envelope.users[envelope.activeUserId].videoAnalyses.push({ id: "video", sessionId: "w1d1", createdAt: at, fileName: "move.mp4", duration: 10, size: 100, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [{ title: "Control", body: "Respira." }] });
     localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
     localStorage.setItem("climb4w.state.v1", "not-json");
-    expect(loadUserData(localStorage, options())).toEqual({ envelope, warning: null, migrated: false, canPersist: true });
+    expect(loadUserData(localStorage, options())).toEqual({ envelope, warning: null, migrated: false, hasRecoveryEnvelope: true, canPersist: true });
   });
 
   it("migrates legacy state and guided progress once with a stable user ID", () => {
