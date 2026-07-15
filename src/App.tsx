@@ -117,7 +117,11 @@ import { cn } from "@/lib/utils";
 import { GuidedSessionFlow } from "@/features/guided-session/GuidedSessionFlow";
 import { GuidedResumeBanner } from "@/features/guided-session/GuidedResumeBanner";
 import { guidedSessionDefinitions } from "@/features/guided-session/guided-session-data";
-import { loadGuidedSessionState } from "@/features/guided-session/guided-session-storage";
+import { appendChangedFacts, projectTrackerState } from "@/features/user-data/user-facts";
+import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
+import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
+import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
+import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
 import {
   defaultState,
   exerciseLibrary,
@@ -127,7 +131,6 @@ import {
   sessionExerciseMap
 } from "@/lib/training";
 
-const STORAGE_KEY = "climb4w.state.v1";
 const THEME_STORAGE_KEY = "climb4w.theme";
 const DB_NAME = "climb4w.videos";
 const DB_VERSION = 1;
@@ -284,15 +287,6 @@ function applyTheme(theme) {
     localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
   } catch {
     // Theme still applies for the current page if storage is unavailable.
-  }
-}
-
-function loadState() {
-  try {
-    const storedState = localStorage.getItem(STORAGE_KEY);
-    return storedState ? normalizeState(JSON.parse(storedState)) : cloneData(defaultState);
-  } catch {
-    return cloneData(defaultState);
   }
 }
 
@@ -1224,7 +1218,18 @@ function TrainingSidebar({
 }
 
 export default function App() {
-  const [state, setState] = useState(loadState);
+  const [initialUserLoad] = useState(() => loadUserData(localStorage, {
+    now: () => new Date().toISOString(),
+    makeId,
+    normalizeLegacyTracker: normalizeState,
+    guidedDefinitions: guidedSessionDefinitions
+  }));
+  const [userData, setUserData] = useState(initialUserLoad.envelope);
+  const [userDataWarning, setUserDataWarning] = useState(initialUserLoad.warning);
+  const userDataRef = useRef(userData);
+  userDataRef.current = userData;
+  const activeUser = userData.users[userData.activeUserId];
+  const state = useMemo(() => projectTrackerState(activeUser), [activeUser]);
   const [theme, setTheme] = useState(loadTheme);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [activeWeek, setActiveWeek] = useState("all");
@@ -1246,10 +1251,17 @@ export default function App() {
   });
   const detailRef = useRef(null);
   const videoRef = useRef(null);
+  const skipInitialUserSave = useRef(true);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    if (skipInitialUserSave.current) {
+      skipInitialUserSave.current = false;
+      return;
+    }
+    if (!initialUserLoad.canPersist) return;
+    const result = saveUserData(localStorage, userData);
+    if (!result.ok) setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
+  }, [initialUserLoad.canPersist, userData]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -1274,7 +1286,7 @@ export default function App() {
   const selectedSession = sessionById(selectedSessionId);
   const selectedExercises = getSessionExercises(selectedSession);
   const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
-  const guidedSnapshot = loadGuidedSessionState(localStorage, guidedSessionDefinitions, new Date().toISOString()).state;
+  const guidedSnapshot = activeUser.guidedSessions;
   const activeGuidedRun = guidedSnapshot.activeRun;
   const guidedCompletedSessionIds = new Set(
     [...guidedSnapshot.history, ...(activeGuidedRun ? [activeGuidedRun] : [])]
@@ -1398,10 +1410,53 @@ export default function App() {
     [questionnaireProfile]
   );
 
-  const exportJson = useMemo(
-    () => JSON.stringify({ goals: state.goals, profile: state.profile, logs: state.logs, videos: state.videos, plan }, null, 2),
-    [state]
-  );
+  const exportSnapshot = useMemo(() => {
+    const exportedAt = new Date().toISOString();
+    return {
+      json: buildUserDataExport(userData, exportedAt),
+      filename: userDataExportFilename(userData, exportedAt)
+    };
+  }, [userData]);
+  const exportJson = exportSnapshot.json;
+
+  const guidedStorage = useMemo(() => createUserGuidedStorage({
+    storage: localStorage,
+    getGuidedSessions: () => {
+      const current = userDataRef.current;
+      return current.users[current.activeUserId].guidedSessions;
+    },
+    replaceGuidedSessions: (guidedSessions) => {
+      setUserData((current) => {
+        const userId = current.activeUserId;
+        const user = current.users[userId];
+        const next = {
+          ...current,
+          users: {
+            ...current.users,
+            [userId]: {
+              ...user,
+              identity: { ...user.identity, updatedAt: new Date().toISOString() },
+              guidedSessions
+            }
+          }
+        };
+        userDataRef.current = next;
+        return next;
+      });
+    }
+  }), []);
+
+  function updateActiveUser(update) {
+    setUserData((current) => {
+      const userId = current.activeUserId;
+      const previous = current.users[userId];
+      const nextUser = update(previous);
+      if (nextUser === previous) return current;
+      const next = { ...current, users: { ...current.users, [userId]: nextUser } };
+      userDataRef.current = next;
+      return next;
+    });
+  }
 
   function handleCalendarDate(date) {
     if (!date) return;
@@ -1420,54 +1475,50 @@ export default function App() {
       const value = form.get(name);
       return value === null ? fallback : String(value);
     };
-    setState((current) => ({
-      ...current,
-      goals: {
-        currentGrade: field("currentGrade", current.goals.currentGrade),
-        targetGrade: field("targetGrade", current.goals.targetGrade),
-        project: field("project", current.goals.project),
-        focus: field("focus", current.goals.focus)
-      },
-      profile: {
-        ...current.profile,
-        ...Object.fromEntries(profileFields.map((name) => [name, field(name, current.profile[name])]))
-      }
-    }));
+    const now = new Date().toISOString();
+    const values = {
+      currentGrade: field("currentGrade", state.goals.currentGrade),
+      targetGrade: field("targetGrade", state.goals.targetGrade),
+      project: field("project", state.goals.project),
+      focus: field("focus", state.goals.focus),
+      ...Object.fromEntries(profileFields.map((name) => [name, field(name, state.profile[name])]))
+    };
+    updateActiveUser((current) => {
+      const next = appendChangedFacts(current, values, { type: "profile-form", version: 1 }, now, makeId);
+      return {
+        ...next,
+        identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now }
+      };
+    });
   }
 
   function saveQuestionnaire(payload) {
     if (payload?.preventDefault) payload.preventDefault();
     const form = payload instanceof FormData ? payload : new FormData(payload.currentTarget);
-    setState((current) => {
-      const nextProfile = buildProfileFromQuestionnaireForm(form, {
-        ...current.profile,
-        project: current.goals.project,
-        focus: current.goals.focus
-      });
-      const { project, focus, ...profile } = nextProfile;
-      return {
-        ...current,
-        goals: {
-          ...current.goals,
-          project: String(project || current.goals.project),
-          focus: String(focus || current.goals.focus)
-        },
-        profile
-      };
+    const now = new Date().toISOString();
+    const nextProfile = buildProfileFromQuestionnaireForm(form, questionnaireProfile);
+    const values = {
+      ...nextProfile,
+      project: String(nextProfile.project || state.goals.project),
+      focus: String(nextProfile.focus || state.goals.focus),
+      questionnaireCompleted: true,
+      questionnaireCompletedAt: now,
+      questionnaireVersion: QUESTIONNAIRE_VERSION
+    };
+    updateActiveUser((current) => {
+      const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      return { ...next, identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now } };
     });
     setQuestionnaireOpen(false);
   }
 
   function skipQuestionnaire() {
-    setState((current) => ({
-      ...current,
-      profile: {
-        ...current.profile,
-        questionnaireCompleted: true,
-        questionnaireCompletedAt: new Date().toISOString(),
-        questionnaireVersion: QUESTIONNAIRE_VERSION
-      }
-    }));
+    const now = new Date().toISOString();
+    updateActiveUser((current) => appendChangedFacts(current, {
+      questionnaireCompleted: true,
+      questionnaireCompletedAt: now,
+      questionnaireVersion: QUESTIONNAIRE_VERSION
+    }, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId));
     setQuestionnaireOpen(false);
   }
 
@@ -1526,7 +1577,7 @@ export default function App() {
       notes: logForm.notes,
       ...values
     };
-    setState((current) => ({ ...current, logs: [...current.logs, log] }));
+    updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
     setLogError("");
   }
 
@@ -1589,10 +1640,10 @@ export default function App() {
       });
       return;
     }
-    setState((current) => ({
+    updateActiveUser((current) => ({
       ...current,
-      videos: [
-        ...current.videos,
+      videoAnalyses: [
+        ...current.videoAnalyses,
         {
           id,
           createdAt: new Date().toISOString(),
@@ -1628,7 +1679,7 @@ export default function App() {
 
   async function removeVideo(id) {
     await deleteVideoBlob(id);
-    setState((current) => ({ ...current, videos: current.videos.filter((video) => video.id !== id) }));
+    updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.filter((video) => video.id !== id) }));
   }
 
   function downloadJson() {
@@ -1636,14 +1687,29 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "climbing-4w-tracker.json";
+    link.download = exportSnapshot.filename;
     link.click();
     URL.revokeObjectURL(url);
   }
 
   async function resetData() {
-    await clearVideoBlobs().catch(() => undefined);
-    setState(cloneData(defaultState));
+    try {
+      await clearVideoBlobs();
+    } catch {
+      setUserDataWarning("No pudimos borrar los videos locales. Tus datos no se modificaron.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const fresh = migrateLegacyUserData({
+      tracker: cloneData(defaultState),
+      guided: { schemaVersion: 1, activeRun: null, history: [] },
+      now,
+      makeId
+    });
+    const next = { ...fresh, migration: { migratedFrom: null, migratedAt: null } };
+    userDataRef.current = next;
+    setUserData(next);
+    setQuestionnaireOpen(true);
     setLogForm(defaultLogValues);
     setVideoFile(null);
     setVideoUrl("");
@@ -1703,6 +1769,13 @@ export default function App() {
               </header>
 
               <div className="mx-auto w-full max-w-7xl px-3 py-3 sm:px-6 sm:py-4 lg:px-8 2xl:max-w-[96rem]">
+        {userDataWarning ? (
+          <Alert role="alert" className="mb-4 border-amber-500/40 bg-amber-500/10">
+            <ShieldAlert className="size-4" />
+            <AlertTitle>Revisar datos locales</AlertTitle>
+            <AlertDescription>{userDataWarning}</AlertDescription>
+          </Alert>
+        ) : null}
 
         <TabsContent value="dashboard" className="mt-0">
           <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -2669,9 +2742,16 @@ export default function App() {
                     <Database className="size-5 text-primary" />
                     Respaldo local
                   </CardTitle>
-                  <CardDescription>Copia o descarga perfil, logs, videos y plan.</CardDescription>
+                  <CardDescription>Copia o descarga todos los datos del usuario activo.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <Alert role="note" className="border-amber-500/30 bg-amber-500/5">
+                    <ShieldAlert className="size-4" />
+                    <AlertTitle>Archivo sensible</AlertTitle>
+                    <AlertDescription>
+                      Usuario activo: <span className="font-mono">{userData.activeUserId}</span>. El JSON incluye historial de perfil, sesiones y analisis.
+                    </AlertDescription>
+                  </Alert>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" onClick={() => navigator.clipboard?.writeText(exportJson)}>
                       <FileText className="size-4" />
@@ -2776,6 +2856,7 @@ export default function App() {
             session={selectedSession}
             definition={selectedGuidedDefinition}
             definitions={guidedSessionDefinitions}
+            storage={guidedStorage}
             onCloseToPlan={() => {
               setActiveTab("plan");
               setGuidedSessionOpen(false);

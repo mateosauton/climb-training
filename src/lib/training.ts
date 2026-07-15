@@ -97,6 +97,11 @@ export type SessionLog = {
   energy: number;
 };
 
+export type VideoAdvice = {
+  title: string;
+  body: string;
+};
+
 export type VideoAnalysis = {
   id: string;
   sessionId: string;
@@ -111,6 +116,7 @@ export type VideoAnalysis = {
   shoulder: number;
   breath: number;
   reading: number;
+  advice: VideoAdvice[];
 };
 
 export type LogNumberKey = keyof typeof logNumberLimits;
