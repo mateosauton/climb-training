@@ -15,6 +15,7 @@ export interface CloudVideoClient {
   auth: { getUser(): PromiseLike<CloudResult<{ user: { id: string } | null }>> };
   storage: { from(bucket: typeof VIDEO_BUCKET): {
     upload(path: string, file: VideoFile, options: { contentType: string; upsert: boolean }): PromiseLike<CloudResult>;
+    download(path: string): PromiseLike<CloudResult<Blob>>;
     createSignedUrl(path: string, expiresIn: number): PromiseLike<CloudResult<{ signedUrl: string }>>;
     list(path: string, options: { search: string }): PromiseLike<CloudResult<StoredObject[]>>;
   } };
@@ -40,7 +41,7 @@ export function videoPath(userId: string, videoId: string, fileName: string): st
   return `${userId}/${videoId}/original.${extension}`;
 }
 
-async function sha256(file: VideoFile): Promise<string> {
+async function sha256(file: Blob): Promise<string> {
   const bytes = await file.arrayBuffer();
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -56,7 +57,7 @@ function matchesAsset(asset: VideoAsset, athleteId: string, videoId: string, pat
 
 export function createCloudVideoService(
   client: CloudVideoClient,
-  dependencies: { createId?: () => string; checksum?: (file: VideoFile) => Promise<string> } = {}
+  dependencies: { createId?: () => string; checksum?: (file: Blob) => Promise<string> } = {}
 ) {
   const createId = dependencies.createId ?? crypto.randomUUID.bind(crypto);
   const checksum = dependencies.checksum ?? sha256;
@@ -102,13 +103,22 @@ export function createCloudVideoService(
       const verified = await asset(videoId);
       const objects = await client.storage.from(VIDEO_BUCKET).list(`${athleteId}/${videoId}`, { search: path.split("/").pop()! });
       const object = objects.data?.find((candidate) => candidate.name === path.split("/").pop());
-      if (objects.error || !verified || !matchesAsset(verified, athleteId, videoId, path, digest, file.size) || !object || Number(object.metadata?.size) !== file.size) {
+      const stored = await client.storage.from(VIDEO_BUCKET).download(path);
+      const storedChecksum = !stored.error && stored.data ? await checksum(stored.data) : null;
+      if (objects.error || !verified || !matchesAsset(verified, athleteId, videoId, path, digest, file.size) || !object || Number(object.metadata?.size) !== file.size || storedChecksum !== verified.checksum) {
         await client.from("video_assets").update({ sanitized_failure: { code: "upload_pending" } }).eq("id", videoId);
         throw failure("upload_pending", videoId, path);
       }
       const updated = await client.from("video_assets").update({ upload_status: "uploaded", processing_status: "pending", sanitized_failure: null }).eq("id", videoId);
       if (updated.error) throw failure("unavailable", videoId, path);
       return { videoId, path };
+    },
+
+    async reconciledUpload(videoId: string) {
+      const athleteId = await authenticatedUserId();
+      const saved = await asset(videoId);
+      if (!saved || saved.athlete_id !== athleteId || saved.upload_status !== "uploaded") return null;
+      return { videoId, path: saved.object_path };
     },
 
     async playbackUrl(videoId: string) {

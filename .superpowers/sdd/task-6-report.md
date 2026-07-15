@@ -13,3 +13,9 @@ Review remediation:
 - Local video records persist cloud ID, object path, and status. Reload restores a pending recovery blob and exposes a retry action; selecting a different file abandons that recovery record and starts a new UUID lifecycle.
 - Playback resolves the caller-owned `video_assets` row and uses its stored path with a fixed 60-second signed URL.
 - Added focused unit coverage for metadata, upload, integrity, retry-file, playback, and analysis-RPC failure boundaries, plus pgTAP coverage for version append and ownership.
+
+Review follow-up:
+
+- Upload completion now downloads and SHA-256 hashes the stored private object, requiring it to match the persisted asset checksum before marking it uploaded or deleting IndexedDB recovery.
+- Pending local recovery metadata is synchronously written and read-back verified before upload and analysis RPC effects; reload reconciles already-uploaded owned cloud metadata before deleting a local recovery blob.
+- Added checksum-mismatch and persisted-recovery reload-boundary regression coverage.

@@ -122,7 +122,7 @@ import { appendChangedFacts, projectTrackerState } from "@/features/user-data/us
 import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
-import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
+import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
 import { readAuthConfig } from "@/features/auth/auth-config";
@@ -1289,7 +1289,15 @@ export default function App({
   useEffect(() => {
     const pending = activeUser.videoAnalyses.find((video) => video.cloud && video.cloud.uploadStatus !== "uploaded");
     if (!pending || pendingVideoId || videoFile) return;
-    getVideo(pending.id).then((blob) => {
+    const recover = async () => {
+      if (cloudVideoClient) {
+        const reconciled = await createCloudVideoService(cloudVideoClient).reconciledUpload(pending.cloud.id).catch(() => null);
+        if (reconciled && persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === pending.id ? { ...video, cloud: { id: reconciled.videoId, path: reconciled.path, uploadStatus: "uploaded" } } : video) }))) {
+          await deleteVideoBlob(pending.id).catch(() => undefined);
+          return;
+        }
+      }
+      const blob = await getVideo(pending.id);
       if (!blob) return;
       const file = blob instanceof File ? blob : new File([blob], pending.fileName, { type: `video/${pending.fileName.split(".").pop()}` });
       setVideoFile(file);
@@ -1298,7 +1306,8 @@ export default function App({
       setSelectedSessionId(pending.sessionId);
       setVideoUrl(URL.createObjectURL(file));
       setVideoStatus({ tone: "error", title: "Carga pendiente", body: "Recuperamos tu video local. Puedes reintentar la carga privada." });
-    }).catch(() => undefined);
+    };
+    recover().catch(() => undefined);
   }, [activeUser.videoAnalyses, pendingVideoId, videoFile]);
 
   useEffect(() => {
@@ -1506,6 +1515,21 @@ export default function App({
     });
   }
 
+  function persistActiveUser(update) {
+    const current = userDataRef.current;
+    const userId = current.activeUserId;
+    const nextUser = update(current.users[userId]);
+    const next = nextUser === current.users[userId] ? current : { ...current, users: { ...current.users, [userId]: nextUser } };
+    const result = persistRecoveryBeforeCloudEffect(localStorage, next);
+    if (!result.ok) {
+      setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
+      return false;
+    }
+    userDataRef.current = next;
+    setUserData(next);
+    return true;
+  }
+
   function handleCalendarDate(date) {
     if (!date) return;
     const isoDate = toIsoDate(date);
@@ -1693,7 +1717,7 @@ export default function App({
       });
       return;
     }
-    updateActiveUser((current) => current.videoAnalyses.some((video) => video.id === id) ? current : ({
+    const recoveryPersisted = persistActiveUser((current) => current.videoAnalyses.some((video) => video.id === id) ? current : ({
       ...current,
       videoAnalyses: [...current.videoAnalyses, {
         id,
@@ -1708,6 +1732,10 @@ export default function App({
         cloud: { id, path: videoPath(authUser.id, id, videoMeta.name), uploadStatus: "pending" }
       }]
     }));
+    if (!recoveryPersisted) {
+      setVideoStatus({ tone: "error", title: "No se pudo guardar", body: "No confirmamos la recuperación local, así que no iniciamos ninguna carga privada." });
+      return;
+    }
     setPendingVideoId(id);
     if (!cloudVideoClient) {
       setVideoStatus({ tone: "error", title: "Carga pendiente", body: "No hay conexión privada configurada. El archivo queda guardado localmente para recuperar o reintentar." });
@@ -1716,18 +1744,25 @@ export default function App({
     try {
       const service = createCloudVideoService(cloudVideoClient);
       const uploaded = await service.upload(videoFile, { videoId: id, durationSeconds: videoMeta.duration });
+      if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "analysis_pending" } } : video) }))) {
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El video privado se cargó, pero conservamos la recuperación local hasta guardar el estado del análisis." });
+        return;
+      }
       await service.appendAnalysis(id, {
         status: "completed",
         metrics: { session_id: selectedSessionId, notes: videoNotes, foot_cuts: videoValues.footCuts, swing: videoValues.swing, hips: videoValues.hips, shoulder: videoValues.shoulder, breath: videoValues.breath, reading: videoValues.reading },
         advice: { recommendations: advice }
       });
+      if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "uploaded" } } : video) }))) {
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis terminó, pero conservamos la recuperación local hasta guardar su confirmación." });
+        return;
+      }
       await deleteVideoBlob(id);
-      updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "uploaded" } } : video) }));
       setPendingVideoId(null);
       setVideoStatus({ tone: "ready", title: "Analisis guardado", body: "El video se guardó en tu archivo privado. La copia local temporal ya se eliminó." });
     } catch (error) {
       const uploadStatus = error?.code === "upload_pending" ? "pending" : "analysis_pending";
-      updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { ...(video.cloud || { id, path: videoPath(authUser.id, id, videoMeta.name) }), uploadStatus } } : video) }));
+      persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { ...(video.cloud || { id, path: videoPath(authUser.id, id, videoMeta.name) }), uploadStatus } } : video) }));
       setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis y el archivo siguen guardados localmente. Puedes volver a intentar sin perder el video." });
     }
   }

@@ -16,7 +16,7 @@ describe("videoPath", () => {
   });
 });
 
-function fakeClient({ uploadError, metadataError, asset, objects }: { uploadError?: unknown; metadataError?: unknown; asset?: Record<string, unknown> | null; objects?: Array<Record<string, unknown>> } = {}) {
+function fakeClient({ uploadError, metadataError, asset, objects, downloaded }: { uploadError?: unknown; metadataError?: unknown; asset?: Record<string, unknown> | null; objects?: Array<Record<string, unknown>>; downloaded?: Blob | null } = {}) {
   const upload = vi.fn().mockResolvedValue({ error: uploadError ?? null });
   const update = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
   const insert = vi.fn().mockResolvedValue({ error: metadataError ?? null });
@@ -26,11 +26,12 @@ function fakeClient({ uploadError, metadataError, asset, objects }: { uploadErro
     : vi.fn().mockResolvedValue({ data: asset, error: null });
   const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle }) });
   const list = vi.fn().mockResolvedValue({ data: objects ?? [{ name: "original.mp4", metadata: { size: 4 } }], error: null });
+  const download = vi.fn().mockResolvedValue({ data: downloaded ?? new Blob(["clip"]), error: null });
   const rpc = vi.fn().mockResolvedValue({ error: null });
   return {
     client: {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "athlete-1" } }, error: null }) },
-      storage: { from: vi.fn().mockReturnValue({ upload, createSignedUrl: vi.fn(), list }) },
+      storage: { from: vi.fn().mockReturnValue({ upload, createSignedUrl: vi.fn(), list, download }) },
       from: vi.fn().mockReturnValue({ insert, update, select }),
       rpc
     },
@@ -38,6 +39,7 @@ function fakeClient({ uploadError, metadataError, asset, objects }: { uploadErro
     insert,
     update,
     list,
+    download,
     rpc
   };
 }
@@ -91,6 +93,20 @@ describe("cloud video lifecycle", () => {
     const file = new File(["clip"], "attempt.mp4", { type: "video/mp4" });
 
     await expect(service.upload(file, { videoId: "video-1" })).rejects.toEqual({ code: "upload_pending", videoId: "video-1", path: "athlete-1/video-1/original.mp4" });
+  });
+
+  it("keeps recovery pending when the stored private object checksum differs from persisted metadata", async () => {
+    const fake = fakeClient({
+      asset: { id: "video-1", athlete_id: "athlete-1", object_path: "athlete-1/video-1/original.mp4", checksum: "a".repeat(64), byte_size: 4, upload_status: "pending" },
+      downloaded: new Blob(["tampered"])
+    });
+    const checksum = vi.fn().mockResolvedValueOnce("a".repeat(64)).mockResolvedValueOnce("b".repeat(64));
+    const service = createCloudVideoService(fake.client, { createId: () => "video-1", checksum });
+
+    await expect(service.upload(new File(["clip"], "attempt.mp4", { type: "video/mp4" }), { videoId: "video-1" }))
+      .rejects.toEqual({ code: "upload_pending", videoId: "video-1", path: "athlete-1/video-1/original.mp4" });
+    expect(fake.download).toHaveBeenCalledWith("athlete-1/video-1/original.mp4");
+    expect(fake.update).toHaveBeenCalledWith({ sanitized_failure: { code: "upload_pending" } });
   });
 
   it("rejects a retry whose file checksum differs from its pending metadata", async () => {

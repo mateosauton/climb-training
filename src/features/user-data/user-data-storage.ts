@@ -37,6 +37,11 @@ export function saveUserData(storage: Storage, envelope: UserDataEnvelope): User
   }
 }
 
+/** Persists and verifies recovery state before an irreversible remote operation. */
+export function persistRecoveryBeforeCloudEffect(storage: Storage, envelope: UserDataEnvelope): UserDataSaveResult {
+  return saveUserData(storage, envelope);
+}
+
 function freshEnvelope(options: LoadOptions, now: string): UserDataEnvelope {
   const envelope = migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: { schemaVersion: 1, activeRun: null, history: [] }, now, makeId: options.makeId });
   return { ...envelope, migration: { migratedFrom: null, migratedAt: null } };
