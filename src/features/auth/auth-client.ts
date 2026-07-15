@@ -2,6 +2,8 @@ import { createClient, type AuthChangeEvent, type AuthError, type Session, type 
 
 import type { AuthConfig } from "./auth-config";
 
+export type { AuthConfig } from "./auth-config";
+
 export type AuthUser = {
   id: string;
   email: string | null;
