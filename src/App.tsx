@@ -127,6 +127,7 @@ import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/au
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
 import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
 import type { CloudRepository } from "@/features/cloud/cloud-repository";
 import type { CloudImport } from "@/features/cloud/cloud-import";
@@ -1247,6 +1248,8 @@ export default function App({
   signingOut = false,
   cloudRepository = null,
   cloudImport = null,
+  loadLegacyVideoBlob = getVideo,
+  uploadLegacyVideo = null,
   cloudVerified = false,
   cloudHydration = null
 }) {
@@ -1573,7 +1576,19 @@ export default function App({
     if (!cloudImport || importStatus === "importing") return;
     setImportStatus("importing");
     try {
-      const receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope);
+      let receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope);
+      if (receipt.status === "metadata_imported" && receipt.pendingVideoIds.length) {
+        const upload = uploadLegacyVideo ?? (cloudVideoClient ? createCloudVideoService(cloudVideoClient).upload : null);
+        if (!upload) throw { code: "legacy_video_unavailable" };
+        const user = initialUserLoad.recoveryEnvelope.users[initialUserLoad.recoveryEnvelope.activeUserId];
+        const completedVideoIds = await stageLegacyImportVideos({
+          pendingVideoIds: receipt.pendingVideoIds,
+          videos: user.videoAnalyses,
+          loadBlob: loadLegacyVideoBlob,
+          upload
+        });
+        receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope, completedVideoIds);
+      }
       // Metadata import is deliberately not treated as completion: local video
       // recovery must remain visible until the server receipt is complete.
       setImportStatus(receipt.status === "completed" ? "completed" : "videos_pending");

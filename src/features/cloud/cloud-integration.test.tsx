@@ -87,16 +87,53 @@ describe("cloud-primary app integration", () => {
     await waitFor(() => expect(importer.import).toHaveBeenCalledTimes(2));
   });
 
-  it("keeps a metadata-only import visibly retryable until its receipt completes", async () => {
+  it("completes a recovery import with no legacy videos without staging uploads", async () => {
     let id = 0;
     const envelope = migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: { schemaVersion: 1, activeRun: null, history: [] }, now: "2026-07-15T00:00:00.000Z", makeId: () => `id-${++id}` });
     localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
-    const importer: CloudImport = { import: vi.fn(async () => ({ status: "metadata_imported" as const, receiptId: "receipt-1", pendingVideoIds: ["video-1"] })) };
-    render(<App cloudImport={importer} />);
+    const importer: CloudImport = { import: vi.fn(async () => ({ status: "completed" as const, receiptId: "receipt-1", pendingVideoIds: [] })) };
+    const uploadLegacyVideo = vi.fn();
 
+    render(<App cloudImport={importer} uploadLegacyVideo={uploadLegacyVideo} />);
     await screen.findByRole("button", { name: "Importar datos locales" }).then((button) => button.click());
-    expect(await screen.findByText("Importación de videos pendiente")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reintentar videos" })).toBeInTheDocument();
+
+    await waitFor(() => expect(importer.import).toHaveBeenCalledTimes(1));
+    expect(uploadLegacyVideo).not.toHaveBeenCalled();
+    expect(screen.queryByText("Importación pendiente")).not.toBeInTheDocument();
+  });
+
+  it("stages legacy IndexedDB videos by receipt ID before completing their import", async () => {
+    let id = 0;
+    const envelope = migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: { schemaVersion: 1, activeRun: null, history: [] }, now: "2026-07-15T00:00:00.000Z", makeId: () => `id-${++id}` });
+    envelope.users[envelope.activeUserId].videoAnalyses.push({ id: "video-1", sessionId: "w1d1", createdAt: "2026-07-15T00:00:00.000Z", fileName: "attempt.mp4", duration: 12, size: 4, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [] });
+    localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
+    const importer: CloudImport = { import: vi.fn()
+      .mockResolvedValueOnce({ status: "metadata_imported", receiptId: "receipt-1", pendingVideoIds: ["video-1"] })
+      .mockResolvedValueOnce({ status: "completed", receiptId: "receipt-1", pendingVideoIds: [] }) };
+    const loadLegacyVideoBlob = vi.fn(async () => new Blob(["clip"], { type: "video/mp4" }));
+    const uploadLegacyVideo = vi.fn(async () => ({ videoId: "video-1", path: "athlete-1/video-1/original.mp4" }));
+
+    render(<App cloudImport={importer} loadLegacyVideoBlob={loadLegacyVideoBlob} uploadLegacyVideo={uploadLegacyVideo} />);
+    await screen.findByRole("button", { name: "Importar datos locales" }).then((button) => button.click());
+
+    await waitFor(() => expect(importer.import).toHaveBeenCalledTimes(2));
+    expect(loadLegacyVideoBlob).toHaveBeenCalledWith("video-1");
+    expect(uploadLegacyVideo).toHaveBeenCalledWith(expect.objectContaining({ name: "attempt.mp4" }), { videoId: "video-1", durationSeconds: 12 });
+    expect(importer.import).toHaveBeenLastCalledWith(expect.any(Object), ["video-1"]);
+  });
+
+  it("retains a retry action when a legacy staged video is unavailable", async () => {
+    let id = 0;
+    const envelope = migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: { schemaVersion: 1, activeRun: null, history: [] }, now: "2026-07-15T00:00:00.000Z", makeId: () => `id-${++id}` });
+    envelope.users[envelope.activeUserId].videoAnalyses.push({ id: "video-1", sessionId: "w1d1", createdAt: "2026-07-15T00:00:00.000Z", fileName: "attempt.mp4", duration: 12, size: 4, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [] });
+    localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
+    const importer: CloudImport = { import: vi.fn(async () => ({ status: "metadata_imported" as const, receiptId: "receipt-1", pendingVideoIds: ["video-1"] })) };
+
+    render(<App cloudImport={importer} loadLegacyVideoBlob={async () => undefined} uploadLegacyVideo={vi.fn()} />);
+    await screen.findByRole("button", { name: "Importar datos locales" }).then((button) => button.click());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos importar tus datos");
+    expect(screen.getByRole("button", { name: "Reintentar importación" })).toBeInTheDocument();
   });
 
   it("writes a questionnaire to the cloud with a retry-safe key after saving recovery data", async () => {
