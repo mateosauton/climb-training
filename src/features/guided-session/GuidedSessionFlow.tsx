@@ -34,8 +34,7 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
     if (definition && definition.blocks.length && (!initialState.activeRun || initialState.activeRun.status === "completed")) {
       initialState = guidedSessionReducer(initialState, { type: "CREATE_RUN", sessionId: session.id, definition, now: now() });
     }
-    const saved = saveGuidedSessionState(storage, initialState);
-    initial.current = { state: initialState, warning: saved.ok ? loaded.warning : "No se puede guardar el progreso. La sesión sigue disponible mientras esta página permanezca abierta." };
+    initial.current = { state: initialState, warning: loaded.warning };
   }
 
   const [state, setState] = useState(initial.current.state);
@@ -45,6 +44,11 @@ export function GuidedSessionFlow({ session, definition, definitions, storage = 
   const [conflictOpen, setConflictOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const saved = saveGuidedSessionState(storage, stateRef.current);
+    if (!saved.ok) setStorageWarning("No se puede guardar el progreso. La sesión sigue disponible mientras esta página permanezca abierta.");
+  }, [storage]);
 
   const transition = useCallback((event: GuidedSessionEvent) => {
     const next = guidedSessionReducer(stateRef.current, event);
