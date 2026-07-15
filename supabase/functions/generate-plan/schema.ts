@@ -6,7 +6,11 @@ export type CatalogExercise = { id: string; contentVersion: number; movementTags
 export type ValidatedGenerationInput = {
   questionnaire: { id: string; version: number; answers: Record<string, unknown> };
   catalog: CatalogExercise[];
-  safety: { rulesetVersion: string; constraints: { maxSessionsPerWeek: number; excludedMovementTags: string[]; requiredRecoveryHours: number } };
+  safety: {
+    rulesetVersion: string;
+    constraints: { maxSessionsPerWeek: number; excludedMovementTags: string[]; requiredRecoveryHours: number };
+    allowedCatalogExerciseIds: string[];
+  };
 };
 export type GeneratedPlan = {
   schemaVersion: number;
@@ -42,12 +46,16 @@ export function parseGenerationRequest(value: unknown): GenerationRequest {
   return { questionnaireId: uuid(value.questionnaireId, "questionnaire_id"), idempotencyKey: string(value.idempotencyKey, "idempotency_key", 128) };
 }
 
-export function parseGeneratedPlan(value: unknown, catalog: CatalogExercise[]): GeneratedPlan {
+export function parseGeneratedPlan(
+  value: unknown,
+  catalog: CatalogExercise[],
+  safety: Pick<ValidatedGenerationInput["safety"], "constraints" | "allowedCatalogExerciseIds">
+): GeneratedPlan {
   if (!record(value)) throw new Error("invalid_plan");
   exact(value, ["schemaVersion", "rationale", "contraindications", "sessions"]);
   if (number(value.schemaVersion, "schema_version", GENERATED_PLAN_SCHEMA_VERSION, GENERATED_PLAN_SCHEMA_VERSION) !== GENERATED_PLAN_SCHEMA_VERSION) throw new Error("invalid_schema_version");
   const catalogVersions = new Map(catalog.map((exercise) => [`${exercise.id}:${exercise.contentVersion}`, exercise]));
-  if (!Array.isArray(value.sessions) || value.sessions.length === 0 || value.sessions.length > 7) throw new Error("invalid_sessions");
+  if (!Array.isArray(value.sessions) || value.sessions.length === 0 || value.sessions.length > 42) throw new Error("invalid_sessions");
   const sessions = value.sessions.map((session, sessionIndex) => {
     if (!record(session)) throw new Error("invalid_session"); exact(session, ["position", "scheduledOffsetDays", "phase", "objective", "intensity", "durationMinutes", "recoveryGuidance", "blocks"]);
     const recoveryGuidance = string(session.recoveryGuidance, "recovery_guidance");
@@ -60,6 +68,7 @@ export function parseGeneratedPlan(value: unknown, catalog: CatalogExercise[]): 
         if (!record(exercise)) throw new Error("invalid_exercise"); exact(exercise, ["position", "exerciseId", "exerciseContentVersion", "sets", "reps", "durationSeconds", "load", "restSeconds", "cues", "substitutions", "generatorContext"]);
         const exerciseId = uuid(exercise.exerciseId, "exercise_id"); const exerciseContentVersion = number(exercise.exerciseContentVersion, "exercise_content_version", 1, 999)!;
         if (!catalogVersions.has(`${exerciseId}:${exerciseContentVersion}`)) throw new Error("unsupported_exercise_id");
+        if (!safety.allowedCatalogExerciseIds.includes(exerciseId)) throw new Error("disallowed_exercise_id");
         const sets = number(exercise.sets, "sets", 1, 20, false), reps = number(exercise.reps, "reps", 1, 100, false), durationSeconds = number(exercise.durationSeconds, "duration_seconds", 1, 3600, false);
         if (sets === undefined && reps === undefined && durationSeconds === undefined) throw new Error("missing_prescription");
         if (!Array.isArray(exercise.substitutions)) throw new Error("invalid_substitutions");
@@ -67,6 +76,13 @@ export function parseGeneratedPlan(value: unknown, catalog: CatalogExercise[]): 
       }) };
     }) };
   });
+  const scheduledOffsets = sessions.map((session) => session.scheduledOffsetDays).sort((left, right) => left - right);
+  if (scheduledOffsets.some((offset) => scheduledOffsets.filter((candidate) => candidate >= offset && candidate < offset + 7).length > safety.constraints.maxSessionsPerWeek)) {
+    throw new Error("max_sessions_exceeded");
+  }
+  if (scheduledOffsets.some((offset, index) => index > 0 && (offset - scheduledOffsets[index - 1]) * 24 < safety.constraints.requiredRecoveryHours)) {
+    throw new Error("insufficient_recovery_hours");
+  }
   return { schemaVersion: GENERATED_PLAN_SCHEMA_VERSION, rationale: string(value.rationale, "rationale", 4000), contraindications: stringArray(value.contraindications, "contraindications"), sessions };
 }
 

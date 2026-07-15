@@ -36,11 +36,14 @@ async function publishedCatalog(admin: any): Promise<CatalogExercise[] | null> {
 }
 
 async function jobForRequest(admin: any, athleteId: string, questionnaireId: string, idempotencyKey: string, inputSnapshot: RecordValue): Promise<Job | null> {
-  const jobs = admin.schema("private").from("plan_generation_jobs");
-  const { data: existing, error: lookupError } = await jobs.select("id, status").eq("athlete_id", athleteId).eq("idempotency_key", idempotencyKey).maybeSingle();
-  if (lookupError) return null;
-  if (existing) return existing as Job;
-  const { data, error } = await jobs.insert({ athlete_id: athleteId, questionnaire_id: questionnaireId, idempotency_key: idempotencyKey, status: "queued", input_schema_version: GENERATION_INPUT_SCHEMA_VERSION, input_snapshot: inputSnapshot, ruleset_version: RULESET_VERSION, attempts: 1 }).select("id, status").single();
+  const { data, error } = await admin.schema("private").rpc("claim_plan_generation_job", {
+    p_athlete_id: athleteId,
+    p_questionnaire_id: questionnaireId,
+    p_idempotency_key: idempotencyKey,
+    p_input_schema_version: GENERATION_INPUT_SCHEMA_VERSION,
+    p_input_snapshot: inputSnapshot,
+    p_ruleset_version: RULESET_VERSION
+  });
   if (error || !data) return null;
   return data as Job;
 }
@@ -77,10 +80,9 @@ Deno.serve(async (request) => {
   }
   try {
     await jobs.update({ status: "running", started_at: new Date().toISOString() }).eq("id", job.id).eq("athlete_id", auth.user.id);
-    const output = parseGeneratedPlan(await generator.generate({ questionnaire, catalog, safety }), catalog);
-    const { error } = await admin.schema("private").rpc("publish_training_plan", { p_athlete_id: auth.user.id, p_source_questionnaire_id: questionnaire.id, p_source_generation_job_id: job.id, p_rationale: output.rationale, p_safety_result: safety, p_hierarchy: publicationHierarchy(output), p_generator_version: "provider-adapter-1", p_ruleset_version: safety.rulesetVersion, p_output_schema_version: GENERATED_PLAN_SCHEMA_VERSION });
+    const output = parseGeneratedPlan(await generator.generate({ questionnaire, catalog, safety }), catalog, safety);
+    const { error } = await admin.schema("private").rpc("publish_and_finalize_training_plan", { p_athlete_id: auth.user.id, p_source_questionnaire_id: questionnaire.id, p_source_generation_job_id: job.id, p_rationale: output.rationale, p_safety_result: safety, p_hierarchy: publicationHierarchy(output), p_generator_version: "provider-adapter-1", p_ruleset_version: safety.rulesetVersion, p_output_schema_version: GENERATED_PLAN_SCHEMA_VERSION, p_output_snapshot: output });
     if (error) throw new Error("publish_failed");
-    await jobs.update({ status: "published", output_schema_version: GENERATED_PLAN_SCHEMA_VERSION, output_snapshot: output, completed_at: new Date().toISOString(), sanitized_error: null }).eq("id", job.id).eq("athlete_id", auth.user.id);
     return json(200, { jobId: job.id, status: "published" });
   } catch (error) {
     const code = error instanceof Error && error.message === "unsupported_exercise_id" ? "invalid_generator_output" : "generation_retryable";

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(31);
 
 insert into auth.users (
   instance_id,
@@ -267,6 +267,87 @@ select is(
   (select count(*) from public.plan_block_exercises e join public.plan_blocks b on b.id = e.block_id join public.plan_sessions s on s.id = b.session_id join public.training_plans p on p.id = s.plan_id where p.athlete_id = '00000000-0000-0000-0000-0000000000c3' and p.version_number = 2 and e.position = 1),
   1::bigint,
   'a nonempty hierarchy is published atomically'
+);
+
+select is(
+  (select (private.claim_plan_generation_job(
+    '00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000d6',
+    'same-key', 1, '{}'::jsonb, 'rules-1'
+  )).id),
+  (select (private.claim_plan_generation_job(
+    '00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000d6',
+    'same-key', 1, '{}'::jsonb, 'rules-1'
+  )).id),
+  'same idempotency key atomically reuses its generation job'
+);
+
+select is(
+  (select count(*) from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key'),
+  1::bigint,
+  'same idempotency key leaves one generation job'
+);
+
+create function private.test_reject_generation_job_finalization()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.status = 'published' then
+    raise exception 'test finalization failure';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger test_reject_generation_job_finalization
+  before update on private.plan_generation_jobs
+  for each row execute function private.test_reject_generation_job_finalization();
+
+select throws_ok(
+  $$select private.publish_and_finalize_training_plan(
+    '00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000d6',
+    (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key'),
+    'Build endurance safely.', '{"status":"approved"}'::jsonb,
+    '{"sessions":[{"position":1,"scheduled_offset_days":0,"phase":"base","objective":"Build endurance.","intensity":"moderate","expected_duration_minutes":40,"recovery_guidance":"Rest.","blocks":[{"position":1,"phase":"main","title":"Capacity","instructions":"Use controlled effort.","duration_minutes":20,"exercises":[{"position":1,"exercise_id":"00000000-0000-0000-0000-0000000000e5","exercise_content_version":1,"sets":3}]}]}]}'::jsonb,
+    'test-generator', 'rules-1', null, null, 1, '{}'::jsonb
+  )$$,
+  'P0001', 'test finalization failure',
+  'a finalization failure rolls back publication'
+);
+
+select is(
+  (select count(*) from public.training_plans where source_generation_job_id = (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key')),
+  0::bigint,
+  'failed finalization leaves no published plan to duplicate'
+);
+
+drop trigger test_reject_generation_job_finalization on private.plan_generation_jobs;
+drop function private.test_reject_generation_job_finalization();
+
+select lives_ok(
+  $$select private.publish_and_finalize_training_plan(
+    '00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000d6',
+    (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key'),
+    'Build endurance safely.', '{"status":"approved"}'::jsonb,
+    '{"sessions":[{"position":1,"scheduled_offset_days":0,"phase":"base","objective":"Build endurance.","intensity":"moderate","expected_duration_minutes":40,"recovery_guidance":"Rest.","blocks":[{"position":1,"phase":"main","title":"Capacity","instructions":"Use controlled effort.","duration_minutes":20,"exercises":[{"position":1,"exercise_id":"00000000-0000-0000-0000-0000000000e5","exercise_content_version":1,"sets":3}]}]}]}'::jsonb,
+    'test-generator', 'rules-1', null, null, 1, '{}'::jsonb
+  )$$,
+  'retry finalizes and publishes once'
+);
+
+select lives_ok(
+  $$select private.publish_and_finalize_training_plan(
+    '00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000d6',
+    (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key'),
+    'Build endurance safely.', '{"status":"approved"}'::jsonb,
+    '{"sessions":[{"position":1,"scheduled_offset_days":0,"phase":"base","objective":"Build endurance.","intensity":"moderate","expected_duration_minutes":40,"recovery_guidance":"Rest.","blocks":[{"position":1,"phase":"main","title":"Capacity","instructions":"Use controlled effort.","duration_minutes":20,"exercises":[{"position":1,"exercise_id":"00000000-0000-0000-0000-0000000000e5","exercise_content_version":1,"sets":3}]}]}]}'::jsonb,
+    'test-generator', 'rules-1', null, null, 1, '{}'::jsonb
+  )$$,
+  'finalization retry reuses the published plan'
+);
+
+select is(
+  (select count(*) from public.training_plans where source_generation_job_id = (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key')),
+  1::bigint,
+  'publication finalization retry cannot create a duplicate plan'
 );
 
 select * from finish();
