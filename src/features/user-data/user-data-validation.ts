@@ -60,8 +60,15 @@ function isFact(value: unknown): value is UserFact {
 }
 
 function isIdentity(value: unknown, userId: string): boolean {
-  return record(value) && exact(value, ["id", "displayName", "createdAt", "updatedAt"])
-    && value.id === userId && typeof value.displayName === "string" && typeof value.createdAt === "string" && typeof value.updatedAt === "string";
+  if (!record(value) || !exact(value, ["id", "displayName", "createdAt", "updatedAt", "auth"])) return false;
+  if (value.id !== userId || typeof value.displayName !== "string" || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string") return false;
+  if (value.auth === null) return true;
+  return record(value.auth)
+    && exact(value.auth, ["provider", "subject", "email"])
+    && value.auth.provider === "supabase"
+    && typeof value.auth.subject === "string"
+    && value.auth.subject.length > 0
+    && (value.auth.email === null || typeof value.auth.email === "string");
 }
 
 function guidedRuns(recordValue: UserRecord): GuidedRun[] {
@@ -109,16 +116,22 @@ function parseUser(value: unknown, userId: string): UserRecord | null {
 
 export function validateUserDataEnvelope(value: unknown): UserDataEnvelope | null {
   if (!record(value) || !exact(value, ["schemaVersion", "activeUserId", "users", "migration"])) return null;
-  if (value.schemaVersion !== 2 || typeof value.activeUserId !== "string" || !record(value.users) || !record(value.migration)) return null;
+  if (value.schemaVersion !== 3 || typeof value.activeUserId !== "string" || !record(value.users) || !record(value.migration)) return null;
   if (!exact(value.migration, ["migratedFrom", "migratedAt"])) return null;
-  if (value.migration.migratedFrom !== null && value.migration.migratedFrom !== "climb4w.state.v1") return null;
+  if (value.migration.migratedFrom !== null && value.migration.migratedFrom !== "climb4w.state.v1" && value.migration.migratedFrom !== "climb4w.users.v2") return null;
   if (value.migration.migratedAt !== null && typeof value.migration.migratedAt !== "string") return null;
   if (!Object.prototype.hasOwnProperty.call(value.users, value.activeUserId)) return null;
 
   const factIds = new Set<string>();
+  const authSubjects = new Set<string>();
   for (const [userId, candidate] of Object.entries(value.users)) {
     const user = parseUser(candidate, userId);
     if (!user) return null;
+    const subject = user.identity.auth?.subject;
+    if (subject) {
+      if (authSubjects.has(subject)) return null;
+      authSubjects.add(subject);
+    }
     for (const fact of user.facts) {
       if (factIds.has(fact.id)) return null;
       factIds.add(fact.id);

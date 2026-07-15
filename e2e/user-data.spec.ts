@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const USER_KEY = "climb4w.users.v2";
+const USER_KEY = "climb4w.users.v3";
 const LEGACY_KEY = "climb4w.state.v1";
 
 async function seedLegacy(page: Page) {
@@ -37,7 +37,7 @@ test("legacy data migrates once and remains stable after reload", async ({ page 
   await page.goto("./");
 
   const first = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), USER_KEY);
-  expect(first.schemaVersion).toBe(2);
+  expect(first.schemaVersion).toBe(3);
   expect(Object.keys(first.users)).toEqual([first.activeUserId]);
   expect(first.migration.migratedFrom).toBe(LEGACY_KEY);
   expect(first.users[first.activeUserId].sessionLogs).toHaveLength(1);

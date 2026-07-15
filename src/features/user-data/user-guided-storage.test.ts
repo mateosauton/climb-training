@@ -18,7 +18,7 @@ describe("active-user guided storage bridge", () => {
     bridge.setItem(GUIDED_STORAGE_KEY, JSON.stringify(next));
     expect(replace).toHaveBeenCalledWith(next);
     expect(JSON.parse(bridge.getItem(GUIDED_STORAGE_KEY)!)).toEqual(next);
-    expect(localStorage.getItem("climb4w.users.v2")).toBeNull();
+    expect(localStorage.getItem("climb4w.users.v3")).toBeNull();
   });
 
   it("rejects invalid guided JSON without updating the user", () => {
