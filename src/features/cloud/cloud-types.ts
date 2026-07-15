@@ -6,6 +6,16 @@ export type QuestionnaireSubmissionInput = {
   idempotencyKey: string;
 };
 
+export type PlanGenerationInput = {
+  questionnaireId: string;
+  idempotencyKey: string;
+};
+
+export type PlanGenerationJob = {
+  jobId: string;
+  status: "published" | "rejected" | "failed" | "provider_not_configured";
+};
+
 export type SessionRunInput = {
   planId: string;
   planSessionId: string;

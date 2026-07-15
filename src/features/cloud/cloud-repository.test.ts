@@ -13,11 +13,13 @@ type Call = {
 function createFakeClient() {
   const calls: Call[] = [];
   const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+  const invoke = vi.fn().mockResolvedValue({ data: { jobId: "job-1", status: "provider_not_configured" }, error: null });
   const getUser = vi.fn().mockResolvedValue({ data: { user: { id: "athlete-1" } }, error: null });
 
   const client: CloudQueryClient = {
     auth: { getUser },
     rpc,
+    functions: { invoke },
     from(table) {
       const filters: Array<[string, unknown]> = [];
       return {
@@ -43,7 +45,7 @@ function createFakeClient() {
     }
   };
 
-  return { client, calls, rpc, getUser };
+  return { client, calls, rpc, getUser, invoke };
 }
 
 describe("cloud repository", () => {
@@ -153,6 +155,16 @@ describe("cloud repository", () => {
         filters: [["status", "active"]]
       }
     ]);
+  });
+
+  it("requests generation without sending an athlete identity", async () => {
+    const fake = createFakeClient();
+    const repository = createCloudRepository(fake.client);
+
+    await expect(repository.generatePlan({ questionnaireId: "questionnaire-1", idempotencyKey: "generation-1" }))
+      .resolves.toEqual({ jobId: "job-1", status: "provider_not_configured" });
+
+    expect(fake.invoke).toHaveBeenCalledWith("generate-plan", { body: { questionnaireId: "questionnaire-1", idempotencyKey: "generation-1" } });
   });
 
   it("returns stable application errors without provider details", async () => {

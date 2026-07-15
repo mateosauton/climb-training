@@ -2,6 +2,8 @@ import type {
   ActivePlan,
   CloudRepositoryError,
   JsonValue,
+  PlanGenerationInput,
+  PlanGenerationJob,
   QuestionnaireSubmissionInput,
   SessionLogInput,
   SessionRunInput
@@ -22,6 +24,9 @@ export interface CloudQueryClient {
     getUser(): PromiseLike<CloudResult<{ user: { id: string } | null }>>;
   };
   rpc(name: "ensure_athlete_profile"): PromiseLike<CloudResult<unknown>>;
+  functions?: {
+    invoke(name: "generate-plan", options: { body: PlanGenerationInput }): PromiseLike<CloudResult<PlanGenerationJob>>;
+  };
   from(table: "questionnaire_submissions" | "session_runs" | "session_logs"): {
     insert(values: Record<string, JsonValue>): PromiseLike<CloudResult<unknown>>;
     upsert(
@@ -37,6 +42,7 @@ export interface CloudQueryClient {
 export type CloudRepository = {
   ensureProfile(): Promise<void>;
   submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
+  generatePlan?(input: PlanGenerationInput): Promise<PlanGenerationJob>;
   listActivePlan(): Promise<ActivePlan | null>;
   startSessionRun(input: SessionRunInput): Promise<void>;
   appendSessionLog(input: SessionLogInput): Promise<void>;
@@ -74,6 +80,13 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         onConflict: "athlete_id,idempotency_key",
         ignoreDuplicates: true
       }));
+    },
+    async generatePlan(input) {
+      await athleteId(client);
+      if (!client.functions) throw failure("unavailable");
+      const { data, error } = await client.functions.invoke("generate-plan", { body: input });
+      if (error || !data) throw failure("unavailable");
+      return data;
     },
     async listActivePlan() {
       const { data, error } = await client.from("training_plans").select("*").eq("status", "active").maybeSingle();
