@@ -210,7 +210,14 @@ test("internal guide references open Profile and Video tabs", async ({ page }) =
   await page.getByRole("button", { name: /abrir en la app:.*perfil y respaldo/i }).click();
   await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
 
-  await page.evaluate(() => localStorage.removeItem("climb4w.guided.v1"));
+  await page.evaluate(() => {
+    const key = "climb4w.users.v2";
+    const envelope = JSON.parse(localStorage.getItem(key) || "null");
+    const user = envelope.users[envelope.activeUserId];
+    user.guidedSessions = { schemaVersion: 1, activeRun: null, history: [] };
+    localStorage.setItem(key, JSON.stringify(envelope));
+  });
+  await page.reload();
   await openTab(page, "Plan");
   await selectSession(page, "w4d6");
   await launchSelected(page);
