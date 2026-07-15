@@ -123,6 +123,9 @@ import { buildUserDataExport, userDataExportFilename } from "@/features/user-dat
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
+import { createCloudClient } from "@/features/cloud/cloud-client";
+import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { readAuthConfig } from "@/features/auth/auth-config";
 import {
   defaultState,
   exerciseLibrary,
@@ -136,6 +139,7 @@ const THEME_STORAGE_KEY = "climb4w.theme";
 const DB_NAME = "climb4w.videos";
 const DB_VERSION = 1;
 const VIDEO_STORE = "videos";
+const cloudVideoClient = createCloudClient(readAuthConfig(import.meta.env));
 
 const defaultLogValues = {
   rpe: "8",
@@ -1269,6 +1273,7 @@ export default function App({
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
+  const [pendingVideoId, setPendingVideoId] = useState(null);
   const [videoValues, setVideoValues] = useState(defaultVideoValues);
   const [videoNotes, setVideoNotes] = useState("");
   const [showJson, setShowJson] = useState(false);
@@ -1276,7 +1281,7 @@ export default function App({
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
-    body: "Sube un clip MP4, MOV o WebM. El analisis queda guardado localmente."
+    body: "Sube un clip MP4, MOV o WebM. Conservamos una copia local hasta verificar la carga privada."
   });
   const detailRef = useRef(null);
   const videoRef = useRef(null);
@@ -1657,7 +1662,8 @@ export default function App({
       });
       return;
     }
-    const id = makeId();
+    const isRetry = Boolean(pendingVideoId);
+    const id = pendingVideoId || makeId();
     const advice = buildAdvice(videoValues, recentPain);
     try {
       await putVideo(id, videoFile);
@@ -1669,41 +1675,62 @@ export default function App({
       });
       return;
     }
-    updateActiveUser((current) => ({
+    updateActiveUser((current) => current.videoAnalyses.some((video) => video.id === id) ? current : ({
       ...current,
-      videoAnalyses: [
-        ...current.videoAnalyses,
-        {
-          id,
-          createdAt: new Date().toISOString(),
-          sessionId: selectedSessionId,
-          fileName: videoMeta.name,
-          duration: videoMeta.duration,
-          size: videoMeta.size,
-          notes: videoNotes,
-          ...videoValues,
-          advice
-        }
-      ]
+      videoAnalyses: [...current.videoAnalyses, {
+        id,
+        createdAt: new Date().toISOString(),
+        sessionId: selectedSessionId,
+        fileName: videoMeta.name,
+        duration: videoMeta.duration,
+        size: videoMeta.size,
+        notes: videoNotes,
+        ...videoValues,
+        advice
+      }]
     }));
-    setVideoStatus({
-      tone: "ready",
-      title: "Analisis guardado",
-      body: "Quedo en el archivo local de videos y puede abrirse desde el historial."
-    });
+    setPendingVideoId(id);
+    if (!cloudVideoClient) {
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "No hay conexión privada configurada. El archivo queda guardado localmente para recuperar o reintentar." });
+      return;
+    }
+    try {
+      const service = createCloudVideoService(cloudVideoClient);
+      await service.upload(videoFile, { videoId: id, durationSeconds: videoMeta.duration, createMetadata: !isRetry });
+      await deleteVideoBlob(id);
+      setPendingVideoId(null);
+      setVideoStatus({ tone: "ready", title: "Analisis guardado", body: "El video se guardó en tu archivo privado. La copia local temporal ya se eliminó." });
+    } catch {
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis y el archivo siguen guardados localmente. Puedes volver a intentar sin perder el video." });
+    }
   }
 
   async function openSavedVideo(id) {
     const blob = await getVideo(id);
-    if (!blob) {
-      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "El archivo no esta en IndexedDB." });
+    if (blob) {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(URL.createObjectURL(blob));
+      setVideoFile(null);
+      setActiveTab("video");
+      setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde el reproductor." });
       return;
     }
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setVideoUrl(URL.createObjectURL(blob));
-    setVideoFile(null);
-    setActiveTab("video");
-    setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde el reproductor." });
+    const saved = state.videos.find((video) => video.id === id);
+    if (!cloudVideoClient || !saved) {
+      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
+      return;
+    }
+    try {
+      const path = videoPath(authUser.id, id, saved.fileName);
+      const signedUrl = await createCloudVideoService(cloudVideoClient).playbackUrl(path);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(signedUrl);
+      setVideoFile(null);
+      setActiveTab("video");
+      setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde un enlace privado temporal." });
+    } catch {
+      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
+    }
   }
 
   async function removeVideo(id) {
@@ -1737,12 +1764,13 @@ export default function App({
     setVideoFile(null);
     setVideoUrl("");
     setVideoMeta(null);
+    setPendingVideoId(null);
     setVideoValues(defaultVideoValues);
     setVideoNotes("");
     setVideoStatus({
       tone: "muted",
       title: "Listo para analizar",
-      body: "Sube un clip MP4, MOV o WebM. El analisis queda guardado localmente."
+      body: "Sube un clip MP4, MOV o WebM. Conservamos una copia local hasta verificar la carga privada."
     });
   }
 
