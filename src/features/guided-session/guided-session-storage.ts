@@ -33,7 +33,7 @@ function isGuidedRun(value: unknown): value is GuidedRun {
     && typeof run.updatedAt === "string";
 }
 
-function isGuidedSessionState(value: unknown): value is GuidedSessionState {
+export function isGuidedSessionState(value: unknown): value is GuidedSessionState {
   if (!value || typeof value !== "object") return false;
   const state = value as Record<string, unknown>;
   return state.schemaVersion === 1
