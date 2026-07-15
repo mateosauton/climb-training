@@ -211,6 +211,10 @@ declare
   published boolean;
 begin
   if tg_op = 'INSERT' and tg_table_name <> 'training_plans' then
+    if current_setting('private.allow_plan_publication_build', true) = 'on' then
+      return new;
+    end if;
+
     select p.published_at is not null
       into published
       from public.training_plans p
@@ -284,6 +288,7 @@ create function private.publish_training_plan(
   p_source_generation_job_id uuid,
   p_rationale text,
   p_safety_result jsonb,
+  p_hierarchy jsonb,
   p_generator_version text default null,
   p_ruleset_version text default null,
   p_prompt_version text default null,
@@ -298,7 +303,31 @@ as $$
 declare
   next_version integer;
   published_plan public.training_plans;
+  session_data record;
+  block_data record;
+  exercise_data record;
+  inserted_session_id uuid;
+  inserted_block_id uuid;
 begin
+  if jsonb_typeof(p_hierarchy) <> 'object'
+    or jsonb_typeof(p_hierarchy -> 'sessions') <> 'array'
+    or jsonb_array_length(p_hierarchy -> 'sessions') = 0
+    or exists (
+      select 1
+      from jsonb_array_elements(p_hierarchy -> 'sessions') session_json
+      where jsonb_typeof(session_json -> 'blocks') <> 'array'
+        or jsonb_array_length(session_json -> 'blocks') = 0
+        or exists (
+          select 1
+          from jsonb_array_elements(session_json -> 'blocks') block_json
+          where jsonb_typeof(block_json -> 'exercises') <> 'array'
+            or jsonb_array_length(block_json -> 'exercises') = 0
+        )
+    ) then
+    raise exception 'p_hierarchy must contain nonempty sessions, blocks, and exercises'
+      using errcode = '22023';
+  end if;
+
   perform pg_advisory_xact_lock(hashtextextended(p_athlete_id::text, 0));
 
   select coalesce(max(version_number), 0) + 1
@@ -307,6 +336,7 @@ begin
     where athlete_id = p_athlete_id;
 
   perform set_config('private.allow_plan_status_transition', 'on', true);
+  perform set_config('private.allow_plan_publication_build', 'on', true);
 
   update public.training_plans
     set status = 'superseded'
@@ -343,6 +373,80 @@ begin
     now()
   ) returning * into published_plan;
 
+  for session_data in
+    select *
+    from jsonb_to_recordset(p_hierarchy -> 'sessions') as x(
+      position integer,
+      scheduled_offset_days integer,
+      phase text,
+      objective text,
+      intensity text,
+      expected_duration_minutes integer,
+      recovery_guidance text,
+      blocks jsonb
+    )
+  loop
+    insert into public.plan_sessions (
+      plan_id, athlete_id, position, scheduled_offset_days, phase, objective,
+      intensity, expected_duration_minutes, recovery_guidance
+    ) values (
+      published_plan.id, p_athlete_id, session_data.position,
+      session_data.scheduled_offset_days, session_data.phase, session_data.objective,
+      session_data.intensity, session_data.expected_duration_minutes,
+      session_data.recovery_guidance
+    ) returning id into inserted_session_id;
+
+    for block_data in
+      select *
+      from jsonb_to_recordset(session_data.blocks) as x(
+        position integer,
+        phase text,
+        title text,
+        instructions text,
+        duration_minutes integer,
+        completion_rules jsonb,
+        exercises jsonb
+      )
+    loop
+      insert into public.plan_blocks (
+        session_id, position, phase, title, instructions, duration_minutes, completion_rules
+      ) values (
+        inserted_session_id, block_data.position, block_data.phase, block_data.title,
+        block_data.instructions, block_data.duration_minutes,
+        coalesce(block_data.completion_rules, '{}'::jsonb)
+      ) returning id into inserted_block_id;
+
+      for exercise_data in
+        select *
+        from jsonb_to_recordset(block_data.exercises) as x(
+          position integer,
+          exercise_id uuid,
+          exercise_content_version integer,
+          sets integer,
+          reps integer,
+          duration_seconds integer,
+          load jsonb,
+          rest_seconds integer,
+          cues text[],
+          substitutions jsonb,
+          generator_context jsonb
+        )
+      loop
+        insert into public.plan_block_exercises (
+          block_id, position, exercise_id, exercise_content_version, sets, reps,
+          duration_seconds, load, rest_seconds, cues, substitutions, generator_context
+        ) values (
+          inserted_block_id, exercise_data.position, exercise_data.exercise_id,
+          exercise_data.exercise_content_version, exercise_data.sets, exercise_data.reps,
+          exercise_data.duration_seconds, coalesce(exercise_data.load, '{}'::jsonb),
+          exercise_data.rest_seconds, coalesce(exercise_data.cues, '{}'::text[]),
+          coalesce(exercise_data.substitutions, '[]'::jsonb),
+          coalesce(exercise_data.generator_context, '{}'::jsonb)
+        );
+      end loop;
+    end loop;
+  end loop;
+
   return published_plan;
 end;
 $$;
@@ -363,7 +467,7 @@ revoke all on all functions in schema private from service_role;
 
 grant usage on schema private to service_role;
 grant select, insert, update, delete on private.plan_generation_jobs to service_role;
-grant execute on function private.publish_training_plan(uuid, uuid, uuid, text, jsonb, text, text, text, text, integer) to service_role;
+grant execute on function private.publish_training_plan(uuid, uuid, uuid, text, jsonb, jsonb, text, text, text, text, integer) to service_role;
 
 grant select on public.exercise_catalog to authenticated;
 grant select on public.training_plans to authenticated;
@@ -377,6 +481,7 @@ revoke insert, update, delete on public.plan_sessions from authenticated;
 revoke insert, update, delete on public.plan_blocks from authenticated;
 revoke insert, update, delete on public.plan_block_exercises from authenticated;
 revoke all on public.exercise_catalog, public.training_plans, public.plan_sessions, public.plan_blocks, public.plan_block_exercises from anon;
+revoke all on public.training_plans, public.plan_sessions, public.plan_blocks, public.plan_block_exercises from service_role;
 
 create policy "athletes read published exercises"
   on public.exercise_catalog for select to authenticated

@@ -69,3 +69,26 @@ run the pgTAP suite.
   local Postgres could not be reached.
 - `npx supabase@latest test db --local supabase/tests/foundation.sql supabase/tests/plans.sql`
   — blocked for the same Docker-daemon condition.
+
+## Publication-path fix
+
+- Reworked the private publication function to require a JSON hierarchy with at
+  least one session, block, and prescription. It inserts the header and all
+  descendants in its single transaction, and only its local transaction flag
+  can add descendants beneath the newly published header.
+- An invalid or empty hierarchy raises `22023` before any active-plan
+  transition or header insert, so it cannot expose an empty or partial public
+  plan.
+- Browser roles remain select-only; `service_role` has private job CRUD and
+  publication-function execution, but no direct plan-hierarchy access.
+- Updated pgTAP fixtures to publish their complete hierarchy through the
+  function instead of inserting descendants after publishing. Added coverage
+  for rejected empty publication, no partial header after rejection, an
+  atomically published nonempty hierarchy, and immutability of that hierarchy.
+
+## Publication-path verification
+
+- `git diff --check` — passed.
+- The pgTAP declaration and test statements both count 24 assertions.
+- `docker info` — blocked: Docker daemon is unavailable, so local reset and
+  pgTAP execution could not run in this environment.
