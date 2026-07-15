@@ -125,6 +125,7 @@ import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/au
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
 import { readAuthConfig } from "@/features/auth/auth-config";
 import {
   defaultState,
@@ -1291,11 +1292,14 @@ export default function App({
     if (!pending || pendingVideoId || videoFile) return;
     const recover = async () => {
       if (cloudVideoClient) {
-        const reconciled = await createCloudVideoService(cloudVideoClient).reconciledUpload(pending.cloud.id).catch(() => null);
-        if (reconciled && persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === pending.id ? { ...video, cloud: { id: reconciled.videoId, path: reconciled.path, uploadStatus: "uploaded" } } : video) }))) {
-          await deleteVideoBlob(pending.id).catch(() => undefined);
-          return;
-        }
+        const service = createCloudVideoService(cloudVideoClient);
+        const recovered = await reconcileUploadedVideoRecovery(pending, {
+          reconciledUpload: service.reconciledUpload,
+          appendAnalysis: service.appendAnalysis,
+          persistUploaded: (videoId, path) => persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === videoId ? { ...video, cloud: { id: video.cloud?.id || videoId, path, uploadStatus: "uploaded" } } : video) })),
+          deleteBlob: deleteVideoBlob
+        }).catch(() => false);
+        if (recovered) return;
       }
       const blob = await getVideo(pending.id);
       if (!blob) return;
