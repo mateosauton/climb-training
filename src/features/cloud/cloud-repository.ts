@@ -85,7 +85,16 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
     },
     async appendSessionLog({ runId, metrics }) {
       const id = await athleteId(client);
-      await requireSuccess(client.from("session_logs").insert({ athlete_id: id, run_id: runId, metrics }));
+      const { rpe, pump, pain, energy, notes } = metrics;
+      await requireSuccess(client.from("session_logs").insert({
+        athlete_id: id,
+        run_id: runId,
+        ...(notes === undefined ? {} : { body: notes }),
+        ...(rpe === undefined ? {} : { rpe }),
+        ...(pump === undefined ? {} : { pump }),
+        ...(pain === undefined ? {} : { pain }),
+        ...(energy === undefined ? {} : { energy })
+      }));
     }
   };
 }

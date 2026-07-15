@@ -44,7 +44,10 @@ describe("cloud repository", () => {
     await repository.ensureProfile();
     await repository.submitQuestionnaire({ version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" });
     await repository.startSessionRun({ planSessionId: "session-1" });
-    await repository.appendSessionLog({ runId: "run-1", metrics: { rpe: 7, notes: "felt good" } });
+    await repository.appendSessionLog({
+      runId: "run-1",
+      metrics: { rpe: 7, pump: 5, pain: 1, energy: 8, notes: "felt good" }
+    });
 
     expect(fake.rpc).toHaveBeenCalledWith("ensure_athlete_profile");
     expect(fake.calls).toEqual([
@@ -76,7 +79,11 @@ describe("cloud repository", () => {
         value: {
           athlete_id: "athlete-1",
           run_id: "run-1",
-          metrics: { rpe: 7, notes: "felt good" }
+          body: "felt good",
+          rpe: 7,
+          pump: 5,
+          pain: 1,
+          energy: 8
         },
         filters: []
       }

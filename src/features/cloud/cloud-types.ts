@@ -12,7 +12,15 @@ export type SessionRunInput = {
 
 export type SessionLogInput = {
   runId: string;
-  metrics: Record<string, JsonValue>;
+  metrics: SessionLogMetrics;
+};
+
+export type SessionLogMetrics = {
+  rpe?: number;
+  pump?: number;
+  pain?: number;
+  energy?: number;
+  notes?: string;
 };
 
 export type ActivePlan = {

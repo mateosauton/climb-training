@@ -68,6 +68,7 @@ create table public.video_assets (
   unique (id, athlete_id),
   foreign key (run_id, athlete_id)
     references public.session_runs (id, athlete_id) on delete set null (run_id),
+  check (split_part(object_path, '/', 1) = athlete_id::text),
   check (sanitized_failure is null or jsonb_typeof(sanitized_failure) = 'object')
 );
 

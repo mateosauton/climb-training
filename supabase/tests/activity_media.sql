@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(18);
+select plan(26);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -33,6 +33,9 @@ where id in ('00000000-0000-0000-0000-000000000311', '00000000-0000-0000-0000-00
 insert into storage.objects (bucket_id, name)
 values ('climbing-videos', '00000000-0000-0000-0000-000000000302/private.mp4');
 
+insert into public.session_runs (id, athlete_id, plan_session_id, status)
+values ('00000000-0000-0000-0000-000000000342', '00000000-0000-0000-0000-000000000302', '00000000-0000-0000-0000-000000000322', 'completed');
+
 set local role authenticated;
 set local "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000301';
 
@@ -59,6 +62,22 @@ select throws_ok(
 );
 
 select throws_ok(
+  $$insert into public.session_runs (athlete_id, plan_session_id, status, duration_seconds)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000321', 'completed', -1)$$,
+  '23514',
+  null,
+  'run rejects a negative duration'
+);
+
+select throws_ok(
+  $$insert into public.session_runs (athlete_id, plan_session_id, status, pump)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000321', 'completed', 11)$$,
+  '23514',
+  null,
+  'run rejects pump outside the valid range'
+);
+
+select throws_ok(
   $$insert into public.session_block_progress (athlete_id, run_id, block_id, status, attempts, duration_seconds)
     values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000341', '00000000-0000-0000-0000-000000000332', 'completed', 1, 60)$$,
   '23514',
@@ -75,11 +94,43 @@ select throws_ok(
 );
 
 select throws_ok(
+  $$insert into public.session_block_progress (athlete_id, run_id, block_id, status, attempts, duration_seconds)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000341', '00000000-0000-0000-0000-000000000331', 'completed', 1, -1)$$,
+  '23514',
+  null,
+  'block progress rejects a negative duration'
+);
+
+select throws_ok(
+  $$insert into public.session_block_progress (athlete_id, run_id, block_id, status, attempts, pain)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000341', '00000000-0000-0000-0000-000000000331', 'completed', 1, 11)$$,
+  '23514',
+  null,
+  'block progress rejects pain outside the valid range'
+);
+
+select throws_ok(
   $$insert into public.session_logs (athlete_id, run_id, body, energy)
     values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000341', 'Felt good.', 11)$$,
   '23514',
   null,
   'session log rejects energy outside the valid range'
+);
+
+select throws_ok(
+  $$insert into public.session_logs (athlete_id, run_id, body, pump)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000341', 'Felt good.', 11)$$,
+  '23514',
+  null,
+  'session log rejects pump outside the valid range'
+);
+
+select throws_ok(
+  $$insert into public.session_logs (athlete_id, run_id, body, pain)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000341', 'Felt good.', 11)$$,
+  '23514',
+  null,
+  'session log rejects pain outside the valid range'
 );
 
 select lives_ok(
@@ -94,6 +145,22 @@ select throws_ok(
   '23503',
   null,
   'video metadata must reference a run owned by its athlete'
+);
+
+select throws_ok(
+  $$insert into public.video_assets (athlete_id, object_path, checksum, mime_type, byte_size, duration_seconds, upload_status, processing_status, run_id)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000301/negative-duration.mp4', repeat('d', 64), 'video/mp4', 100, -1, 'uploaded', 'pending', '00000000-0000-0000-0000-000000000341')$$,
+  '23514',
+  null,
+  'video metadata rejects a negative duration'
+);
+
+select throws_ok(
+  $$insert into public.video_assets (athlete_id, object_path, checksum, mime_type, byte_size, upload_status, processing_status, run_id)
+    values ('00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000302/wrong-prefix.mp4', repeat('e', 64), 'video/mp4', 100, 'uploaded', 'pending', '00000000-0000-0000-0000-000000000341')$$,
+  '23514',
+  null,
+  'video metadata rejects an object path outside the athlete UUID prefix'
 );
 
 select lives_ok(
@@ -149,12 +216,10 @@ select lives_ok(
   'athlete deletes an object in their UUID prefix'
 );
 
-set local "request.jwt.claim.sub" = '00000000-0000-0000-0000-000000000302';
-
 select is(
   (select count(*) from storage.objects where bucket_id = 'climbing-videos' and name = '00000000-0000-0000-0000-000000000302/private.mp4'),
   0::bigint,
-  'athlete cannot select another athlete UUID prefix'
+  'athlete A cannot select athlete B existing object'
 );
 
 select ok(
