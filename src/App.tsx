@@ -19,6 +19,7 @@ import {
   Gauge,
   HelpCircle,
   ListChecks,
+  LogOut,
   Minus,
   Moon,
   Play,
@@ -120,7 +121,7 @@ import { guidedSessionDefinitions } from "@/features/guided-session/guided-sessi
 import { appendChangedFacts, projectTrackerState } from "@/features/user-data/user-facts";
 import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
-import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
+import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
 import {
   defaultState,
@@ -387,11 +388,12 @@ async function deleteVideoBlob(id) {
   });
 }
 
-async function clearVideoBlobs() {
+async function deleteVideoBlobs(ids) {
   const db = await openVideoDb();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(VIDEO_STORE, "readwrite");
-    transaction.objectStore(VIDEO_STORE).clear();
+    const store = transaction.objectStore(VIDEO_STORE);
+    ids.forEach((id) => store.delete(id));
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -1016,7 +1018,11 @@ function TrainingSidebar({
   risk,
   goals,
   theme,
-  onThemeToggle
+  onThemeToggle,
+  accountEmail,
+  onSignOut,
+  authError,
+  signingOut
 }) {
   const { setOpenMobile } = useSidebar();
 
@@ -1210,6 +1216,15 @@ function TrainingSidebar({
           >
             {risk.title}
           </Badge>
+          <Separator />
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium text-sidebar-foreground">{accountEmail || "Cuenta Apple"}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-2 w-full justify-start" onClick={onSignOut} disabled={signingOut}>
+              <LogOut className="size-4" />
+              {signingOut ? "Cerrando…" : "Cerrar sesión"}
+            </Button>
+            {authError ? <p role="alert" className="mt-2 text-xs text-destructive">{authError}</p> : null}
+          </div>
         </div>
       </SidebarFooter>
       <SidebarRail />
@@ -1217,13 +1232,27 @@ function TrainingSidebar({
   );
 }
 
-export default function App() {
-  const [initialUserLoad] = useState(() => loadUserData(localStorage, {
-    now: () => new Date().toISOString(),
-    makeId,
-    normalizeLegacyTracker: normalizeState,
-    guidedDefinitions: guidedSessionDefinitions
-  }));
+export default function App({
+  authUser = { id: "test-user", email: null },
+  onSignOut = async () => undefined,
+  authError = null,
+  signingOut = false
+}) {
+  const [initialUserLoad] = useState(() => {
+    const loaded = loadUserData(localStorage, {
+      now: () => new Date().toISOString(),
+      makeId,
+      normalizeLegacyTracker: normalizeState,
+      guidedDefinitions: guidedSessionDefinitions
+    });
+    const envelope = activateAuthenticatedUser(loaded.envelope, authUser, { now: new Date().toISOString(), makeId });
+    let warning = loaded.warning;
+    if (loaded.canPersist) {
+      const saved = saveUserData(localStorage, envelope);
+      if (saved.ok === false) warning = `No pudimos guardar los datos locales: ${saved.error}`;
+    }
+    return { ...loaded, envelope, warning };
+  });
   const [userData, setUserData] = useState(initialUserLoad.envelope);
   const [userDataWarning, setUserDataWarning] = useState(initialUserLoad.warning);
   const userDataRef = useRef(userData);
@@ -1694,19 +1723,13 @@ export default function App() {
 
   async function resetData() {
     try {
-      await clearVideoBlobs();
+      await deleteVideoBlobs(activeUser.videoAnalyses.map((video) => video.id));
     } catch {
       setUserDataWarning("No pudimos borrar los videos locales. Tus datos no se modificaron.");
       return;
     }
     const now = new Date().toISOString();
-    const fresh = migrateLegacyUserData({
-      tracker: cloneData(defaultState),
-      guided: { schemaVersion: 1, activeRun: null, history: [] },
-      now,
-      makeId
-    });
-    const next = { ...fresh, migration: { migratedFrom: null, migratedAt: null } };
+    const next = resetAuthenticatedUser(userData, authUser, { now, makeId });
     userDataRef.current = next;
     setUserData(next);
     setQuestionnaireOpen(true);
@@ -1743,6 +1766,10 @@ export default function App() {
               goals={state.goals}
               theme={theme}
               onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+              accountEmail={authUser.email}
+              onSignOut={onSignOut}
+              authError={authError}
+              signingOut={signingOut}
             />
             <SidebarInset className="min-w-0 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-0">
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
@@ -2745,6 +2772,17 @@ export default function App() {
                   <CardDescription>Copia o descarga todos los datos del usuario activo.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/45 p-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Cuenta Apple</p>
+                      <p className="truncate text-sm font-medium">{authUser.email || "Cuenta Apple"}</p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={onSignOut} disabled={signingOut}>
+                      <LogOut className="size-4" />
+                      {signingOut ? "Cerrando…" : "Cerrar sesión"}
+                    </Button>
+                    {authError ? <p role="alert" className="w-full text-xs text-destructive">{authError}</p> : null}
+                  </div>
                   <Alert role="note" className="border-amber-500/30 bg-amber-500/5">
                     <ShieldAlert className="size-4" />
                     <AlertTitle>Archivo sensible</AlertTitle>

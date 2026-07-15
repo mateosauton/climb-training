@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { emptyGuidedSessionState } from "../guided-session/guided-session-storage";
 import { defaultState } from "../../lib/training";
 import { migrateLegacyUserData } from "../user-data/user-data-migration";
-import { activateAuthenticatedUser } from "./authenticated-user";
+import { activateAuthenticatedUser, resetAuthenticatedUser } from "./authenticated-user";
 
 const firstAt = "2026-07-14T12:00:00.000Z";
 const nextAt = "2026-07-14T13:00:00.000Z";
@@ -58,5 +58,18 @@ describe("activateAuthenticatedUser", () => {
     expect(result.users[result.activeUserId].identity.auth).toEqual({ provider: "apple", subject: "apple-2", email: "second@example.com" });
     expect(result.users[result.activeUserId].sessionLogs).toEqual([]);
     expect(result.users[firstId]).toEqual(before);
+  });
+
+  it("resets only the active Apple user's local record", () => {
+    const first = activateAuthenticatedUser(localEnvelope(), { id: "apple-1", email: "first@example.com" }, { now: firstAt, makeId: ids("claim") });
+    const second = activateAuthenticatedUser(first, { id: "apple-2", email: "second@example.com" }, { now: nextAt, makeId: ids("second") });
+    const firstRecord = structuredClone(Object.values(second.users).find((record) => record.identity.auth?.subject === "apple-1")!);
+
+    const result = resetAuthenticatedUser(second, { id: "apple-2", email: "second@example.com" }, { now: nextAt, makeId: ids("reset") });
+
+    expect(Object.values(result.users).find((record) => record.identity.auth?.subject === "apple-1")).toEqual(firstRecord);
+    expect(result.users[result.activeUserId].identity.auth).toEqual({ provider: "apple", subject: "apple-2", email: "second@example.com" });
+    expect(result.users[result.activeUserId].sessionLogs).toEqual([]);
+    expect(result.users[result.activeUserId].identity.id).toBe(second.activeUserId);
   });
 });

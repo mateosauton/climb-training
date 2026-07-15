@@ -9,6 +9,18 @@ type ActivateOptions = {
   makeId: () => string;
 };
 
+function freshAuthenticatedRecord(user: AuthUser, options: ActivateOptions) {
+  const fresh = migrateLegacyUserData({
+    tracker: structuredClone(defaultState),
+    guided: emptyGuidedSessionState(),
+    now: options.now,
+    makeId: options.makeId
+  });
+  const record = fresh.users[fresh.activeUserId];
+  record.identity.auth = { provider: "apple", subject: user.id, email: user.email };
+  return record;
+}
+
 export function activateAuthenticatedUser(
   envelope: UserDataEnvelope,
   user: AuthUser,
@@ -34,15 +46,22 @@ export function activateAuthenticatedUser(
     return next;
   }
 
-  const fresh = migrateLegacyUserData({
-    tracker: structuredClone(defaultState),
-    guided: emptyGuidedSessionState(),
-    now: options.now,
-    makeId: options.makeId
-  });
-  const record = fresh.users[fresh.activeUserId];
-  record.identity.auth = { provider: "apple", subject: user.id, email: user.email };
+  const record = freshAuthenticatedRecord(user, options);
   next.users[record.identity.id] = record;
   next.activeUserId = record.identity.id;
+  return next;
+}
+
+export function resetAuthenticatedUser(
+  envelope: UserDataEnvelope,
+  user: AuthUser,
+  options: ActivateOptions
+): UserDataEnvelope {
+  const next = structuredClone(envelope);
+  const activeId = next.activeUserId;
+  const record = freshAuthenticatedRecord(user, options);
+  record.identity.id = activeId;
+  record.facts = record.facts.map((fact) => ({ ...fact, userId: activeId }));
+  next.users[activeId] = record;
   return next;
 }
