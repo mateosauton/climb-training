@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(8);
+select plan(9);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -70,6 +70,16 @@ select ok(
   has_function_privilege('authenticated', 'public.ensure_athlete_profile()', 'EXECUTE')
   and not has_schema_privilege('authenticated', 'private', 'USAGE'),
   'authenticated callers can execute only the public profile RPC'
+);
+
+select ok(
+  has_function_privilege('service_role', 'public.import_local_metadata(uuid,text,text,jsonb)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.complete_local_import_videos(uuid,uuid,jsonb)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.import_local_metadata(uuid,text,text,jsonb)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.import_local_metadata(uuid,text,text,jsonb)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.complete_local_import_videos(uuid,uuid,jsonb)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.complete_local_import_videos(uuid,uuid,jsonb)', 'EXECUTE'),
+  'only service role can execute import RPCs'
 );
 
 select * from finish();

@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(31);
+select plan(36);
 
 insert into auth.users (
   instance_id,
@@ -219,12 +219,59 @@ select is(
 );
 
 select ok(
-  has_schema_privilege('service_role', 'private', 'USAGE')
-  and has_table_privilege('service_role', 'private.plan_generation_jobs', 'SELECT, INSERT, UPDATE, DELETE')
-  and has_function_privilege('service_role', 'private.publish_training_plan(uuid,uuid,uuid,text,jsonb,jsonb,text,text,text,text,integer)', 'EXECUTE')
-  and not has_table_privilege('service_role', 'public.training_plans', 'SELECT, INSERT, UPDATE, DELETE')
+  not has_schema_privilege('service_role', 'private', 'USAGE')
+  and not has_table_privilege('service_role', 'private.plan_generation_jobs', 'SELECT, INSERT, UPDATE, DELETE')
+  and not has_function_privilege('service_role', 'private.claim_plan_generation_job(uuid,uuid,text,integer,jsonb,text)', 'EXECUTE')
+  and not has_function_privilege('service_role', 'private.publish_and_finalize_training_plan(uuid,uuid,uuid,text,jsonb,jsonb,text,text,text,text,integer,jsonb)', 'EXECUTE')
   and not has_schema_privilege('authenticated', 'private', 'USAGE'),
-  'only the trusted server role has required private access'
+  'private generation internals are inaccessible to API roles'
+);
+
+select ok(
+  has_function_privilege('service_role', 'public.claim_plan_generation_job(uuid,uuid,text,integer,jsonb,text)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.get_plan_generation_job(uuid,uuid)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.update_plan_generation_job(uuid,uuid,text,text,jsonb,jsonb,timestamptz,timestamptz)', 'EXECUTE')
+  and has_function_privilege('service_role', 'public.publish_and_finalize_training_plan(uuid,uuid,uuid,text,jsonb,jsonb,text,text,text,text,integer,jsonb)', 'EXECUTE'),
+  'service role can reach the plan-generation RPC boundary'
+);
+
+select ok(
+  not has_function_privilege('anon', 'public.claim_plan_generation_job(uuid,uuid,text,integer,jsonb,text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.claim_plan_generation_job(uuid,uuid,text,integer,jsonb,text)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.get_plan_generation_job(uuid,uuid)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.get_plan_generation_job(uuid,uuid)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.update_plan_generation_job(uuid,uuid,text,text,jsonb,jsonb,timestamptz,timestamptz)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.update_plan_generation_job(uuid,uuid,text,text,jsonb,jsonb,timestamptz,timestamptz)', 'EXECUTE')
+  and not has_function_privilege('anon', 'public.publish_and_finalize_training_plan(uuid,uuid,uuid,text,jsonb,jsonb,text,text,text,text,integer,jsonb)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.publish_and_finalize_training_plan(uuid,uuid,uuid,text,jsonb,jsonb,text,text,text,text,integer,jsonb)', 'EXECUTE'),
+  'browser roles cannot execute the plan-generation RPC boundary'
+);
+
+select lives_ok(
+  $$select * from public.get_plan_generation_job(
+    '00000000-0000-0000-0000-0000000000d4',
+    (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key')
+  )$$,
+  'service-facing job lookup is reachable through public RPC'
+);
+
+select is(
+  (select status from public.update_plan_generation_job(
+    '00000000-0000-0000-0000-0000000000d4',
+    (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key'),
+    'validated', 'rules-2', '{"status":"approved"}'::jsonb, null, null, null
+  )),
+  'validated',
+  'service-facing job update is reachable through public RPC'
+);
+
+select is(
+  (select id from public.claim_plan_generation_job(
+    '00000000-0000-0000-0000-0000000000d4', '00000000-0000-0000-0000-0000000000d6',
+    'same-key', 1, '{}'::jsonb, 'rules-2'
+  )),
+  (select id from private.plan_generation_jobs where athlete_id = '00000000-0000-0000-0000-0000000000d4' and idempotency_key = 'same-key'),
+  'service-facing job claim reuses the private job through public RPC'
 );
 
 select ok(
