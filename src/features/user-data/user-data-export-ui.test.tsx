@@ -23,7 +23,7 @@ describe("user data export UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Ver JSON" }));
     const exported = JSON.parse((screen.getByLabelText("JSON exportado del tracker") as HTMLTextAreaElement).value);
-    expect(exported.schemaVersion).toBe(2);
+    expect(exported.schemaVersion).toBe(3);
     expect(exported.users[exported.activeUserId].facts.length).toBeGreaterThan(0);
     expect(exported).not.toHaveProperty("plan");
     expect(exported.app.exportedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

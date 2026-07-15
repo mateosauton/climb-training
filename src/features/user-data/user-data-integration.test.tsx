@@ -25,7 +25,7 @@ describe("user data App integration", () => {
 
     await waitFor(() => expect(localStorage.getItem(USER_DATA_STORAGE_KEY)).not.toBeNull());
     const envelope = JSON.parse(localStorage.getItem(USER_DATA_STORAGE_KEY) || "null");
-    expect(envelope.schemaVersion).toBe(2);
+    expect(envelope.schemaVersion).toBe(3);
     expect(Object.keys(envelope.users)).toEqual([envelope.activeUserId]);
     expect(envelope.users[envelope.activeUserId].facts.some((fact: { key: string; value: unknown }) => fact.key === "name" && fact.value === "Mateo")).toBe(true);
   });
@@ -51,12 +51,12 @@ describe("user data App integration", () => {
     });
   });
 
-  it("keeps corrupt v2 JSON unchanged and shows a persistent warning", async () => {
+  it("keeps corrupt v3 JSON unchanged and shows a persistent warning", async () => {
     const corrupt = "{not-valid-json";
     localStorage.setItem(USER_DATA_STORAGE_KEY, corrupt);
     render(<App />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("datos locales v2 estan danados");
+    expect(await screen.findByRole("alert")).toHaveTextContent("datos locales v3 estan danados");
     expect(localStorage.getItem(USER_DATA_STORAGE_KEY)).toBe(corrupt);
   });
 });

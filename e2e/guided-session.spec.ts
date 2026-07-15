@@ -211,7 +211,7 @@ test("internal guide references open Profile and Video tabs", async ({ page }) =
   await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
 
   await page.evaluate(() => {
-    const key = "climb4w.users.v2";
+    const key = "climb4w.users.v3";
     const envelope = JSON.parse(localStorage.getItem(key) || "null");
     const user = envelope.users[envelope.activeUserId];
     user.guidedSessions = { schemaVersion: 1, activeRun: null, history: [] };

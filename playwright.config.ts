@@ -20,6 +20,10 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev -- --port 9176",
+    env: {
+      VITE_E2E_AUTH_USER_ID: "e2e-supabase-user",
+      VITE_E2E_AUTH_EMAIL: "e2e@example.com"
+    },
     url: "http://127.0.0.1:9176/escalada/",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
