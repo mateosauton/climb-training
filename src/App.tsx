@@ -126,6 +126,8 @@ import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
 import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
+import type { CloudRepository } from "@/features/cloud/cloud-repository";
+import type { CloudImport } from "@/features/cloud/cloud-import";
 import { readAuthConfig } from "@/features/auth/auth-config";
 import {
   defaultState,
@@ -1240,7 +1242,9 @@ export default function App({
   authUser = { id: "test-user", email: null },
   onSignOut = async () => undefined,
   authError = null,
-  signingOut = false
+  signingOut = false,
+  cloudRepository = null,
+  cloudImport = null
 }) {
   const [initialUserLoad] = useState(() => {
     const loaded = loadUserData(localStorage, {
@@ -1278,6 +1282,9 @@ export default function App({
   const [videoNotes, setVideoNotes] = useState("");
   const [showJson, setShowJson] = useState(false);
   const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
+  const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.migrated ? "pending" : "idle");
+  const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
+  const pendingQuestionnaire = useRef(null);
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
@@ -1534,6 +1541,29 @@ export default function App({
     return true;
   }
 
+  async function importLocalRecovery() {
+    if (!cloudImport || importStatus === "importing") return;
+    setImportStatus("importing");
+    try {
+      await cloudImport.import(userDataRef.current);
+      setImportStatus("completed");
+    } catch {
+      setImportStatus("failed");
+    }
+  }
+
+  async function submitQuestionnaireToCloud(submission) {
+    if (!cloudRepository || !submission) return;
+    setQuestionnaireCloudStatus("saving");
+    try {
+      await cloudRepository.submitQuestionnaire(submission);
+      pendingQuestionnaire.current = null;
+      setQuestionnaireCloudStatus("saved");
+    } catch {
+      setQuestionnaireCloudStatus("failed");
+    }
+  }
+
   function handleCalendarDate(date) {
     if (!date) return;
     const isoDate = toIsoDate(date);
@@ -1581,11 +1611,21 @@ export default function App({
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
     };
-    updateActiveUser((current) => {
+    const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
       return { ...next, identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now } };
     });
+    if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
+    if (cloudRepository) {
+      const submission = {
+        version: QUESTIONNAIRE_VERSION,
+        answers: values,
+        idempotencyKey: makeId()
+      };
+      pendingQuestionnaire.current = submission;
+      void submitQuestionnaireToCloud(submission);
+    }
   }
 
   function skipQuestionnaire() {
@@ -1865,6 +1905,21 @@ export default function App({
               signingOut={signingOut}
             />
             <SidebarInset className="min-w-0 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-0">
+              {importStatus !== "idle" && importStatus !== "completed" ? (
+                <div role={importStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <div>
+                    <p className="font-medium">{importStatus === "failed" ? "No pudimos importar tus datos" : importStatus === "importing" ? "Importando datos locales…" : "Importación pendiente"}</p>
+                    <p className="text-muted-foreground">Tu copia local se conserva hasta que la nube confirme la importación.</p>
+                  </div>
+                  {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : "Importar datos locales"}</Button> : null}
+                </div>
+              ) : null}
+              {questionnaireCloudStatus === "saving" || questionnaireCloudStatus === "failed" ? (
+                <div role={questionnaireCloudStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <p>{questionnaireCloudStatus === "saving" ? "Guardando cuestionario en la nube…" : "No pudimos guardar el cuestionario en la nube. Tus respuestas siguen disponibles para reintentar."}</p>
+                  {questionnaireCloudStatus === "failed" ? <Button type="button" variant="outline" onClick={() => void submitQuestionnaireToCloud(pendingQuestionnaire.current)}>Reintentar cuestionario</Button> : null}
+                </div>
+              ) : null}
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-auto" />
