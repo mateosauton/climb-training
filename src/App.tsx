@@ -121,6 +121,8 @@ import { guidedSessionDefinitions } from "@/features/guided-session/guided-sessi
 import { appendChangedFacts, projectTrackerState } from "@/features/user-data/user-facts";
 import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
+import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
+import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
 import { createCloudClient } from "@/features/cloud/cloud-client";
@@ -1244,7 +1246,8 @@ export default function App({
   authError = null,
   signingOut = false,
   cloudRepository = null,
-  cloudImport = null
+  cloudImport = null,
+  cloudVerified = false
 }) {
   const [initialUserLoad] = useState(() => {
     const loaded = loadUserData(localStorage, {
@@ -1253,13 +1256,16 @@ export default function App({
       normalizeLegacyTracker: normalizeState,
       guidedDefinitions: guidedSessionDefinitions
     });
-    const envelope = activateAuthenticatedUser(loaded.envelope, authUser, { now: new Date().toISOString(), makeId });
+    const canonical = cloudVerified
+      ? migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: emptyGuidedSessionState(), now: new Date().toISOString(), makeId })
+      : loaded.envelope;
+    const envelope = activateAuthenticatedUser(canonical, authUser, { now: new Date().toISOString(), makeId });
     let warning = loaded.warning;
-    if (loaded.canPersist) {
+    if (loaded.canPersist && !cloudVerified) {
       const saved = saveUserData(localStorage, envelope);
       if (saved.ok === false) warning = `No pudimos guardar los datos locales: ${saved.error}`;
     }
-    return { ...loaded, envelope, warning };
+    return { ...loaded, envelope, recoveryEnvelope: loaded.envelope, warning };
   });
   const [userData, setUserData] = useState(initialUserLoad.envelope);
   const [userDataWarning, setUserDataWarning] = useState(initialUserLoad.warning);
@@ -1282,7 +1288,7 @@ export default function App({
   const [videoNotes, setVideoNotes] = useState("");
   const [showJson, setShowJson] = useState(false);
   const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
-  const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.migrated ? "pending" : "idle");
+  const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
   const pendingQuestionnaire = useRef(null);
   const [videoStatus, setVideoStatus] = useState({
@@ -1326,7 +1332,7 @@ export default function App({
       skipInitialUserSave.current = false;
       return;
     }
-    if (!initialUserLoad.canPersist) return;
+    if (!initialUserLoad.canPersist || cloudVerified) return;
     const result = saveUserData(localStorage, userData);
     if (!result.ok) setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
   }, [initialUserLoad.canPersist, userData]);
@@ -1531,10 +1537,12 @@ export default function App({
     const userId = current.activeUserId;
     const nextUser = update(current.users[userId]);
     const next = nextUser === current.users[userId] ? current : { ...current, users: { ...current.users, [userId]: nextUser } };
-    const result = persistRecoveryBeforeCloudEffect(localStorage, next);
-    if (!result.ok) {
-      setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
-      return false;
+    if (!cloudVerified) {
+      const result = persistRecoveryBeforeCloudEffect(localStorage, next);
+      if (!result.ok) {
+        setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
+        return false;
+      }
     }
     userDataRef.current = next;
     setUserData(next);
@@ -1545,8 +1553,10 @@ export default function App({
     if (!cloudImport || importStatus === "importing") return;
     setImportStatus("importing");
     try {
-      await cloudImport.import(userDataRef.current);
-      setImportStatus("completed");
+      const receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope);
+      // Metadata import is deliberately not treated as completion: local video
+      // recovery must remain visible until the server receipt is complete.
+      setImportStatus(receipt.status === "completed" ? "completed" : "videos_pending");
     } catch {
       setImportStatus("failed");
     }
@@ -1630,12 +1640,19 @@ export default function App({
 
   function skipQuestionnaire() {
     const now = new Date().toISOString();
-    updateActiveUser((current) => appendChangedFacts(current, {
+    const values = {
       questionnaireCompleted: true,
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
-    }, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId));
+    };
+    const recoveryPersisted = persistActiveUser((current) => appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId));
+    if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
+    if (cloudRepository) {
+      const submission = { version: QUESTIONNAIRE_VERSION, answers: values, idempotencyKey: makeId() };
+      pendingQuestionnaire.current = submission;
+      void submitQuestionnaireToCloud(submission);
+    }
   }
 
   function selectSession(sessionId, scroll = false) {
@@ -1908,10 +1925,10 @@ export default function App({
               {importStatus !== "idle" && importStatus !== "completed" ? (
                 <div role={importStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
                   <div>
-                    <p className="font-medium">{importStatus === "failed" ? "No pudimos importar tus datos" : importStatus === "importing" ? "Importando datos locales…" : "Importación pendiente"}</p>
-                    <p className="text-muted-foreground">Tu copia local se conserva hasta que la nube confirme la importación.</p>
+                    <p className="font-medium">{importStatus === "failed" ? "No pudimos importar tus datos" : importStatus === "importing" ? "Importando datos locales…" : importStatus === "videos_pending" ? "Importación de videos pendiente" : "Importación pendiente"}</p>
+                    <p className="text-muted-foreground">Tu copia local se conserva hasta que el recibo de la nube confirme la importación completa.</p>
                   </div>
-                  {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : "Importar datos locales"}</Button> : null}
+                  {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : importStatus === "videos_pending" ? "Reintentar videos" : "Importar datos locales"}</Button> : null}
                 </div>
               ) : null}
               {questionnaireCloudStatus === "saving" || questionnaireCloudStatus === "failed" ? (

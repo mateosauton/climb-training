@@ -58,6 +58,7 @@ function CloudBootstrap({ user, repository, cloudImport }: { user: AuthUser; rep
       signingOut={auth.signingOut}
       cloudRepository={repository}
       cloudImport={cloudImport}
+      cloudVerified={Boolean(repository)}
     />
   );
 }

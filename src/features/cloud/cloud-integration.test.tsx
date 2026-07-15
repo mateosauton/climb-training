@@ -6,6 +6,9 @@ import App from "../../App";
 import type { AuthClient, AuthSession } from "../auth/auth-client";
 import type { CloudRepository } from "./cloud-repository";
 import type { CloudImport } from "./cloud-import";
+import { migrateLegacyUserData } from "../user-data/user-data-migration";
+import { defaultState } from "../../lib/training";
+import { USER_DATA_STORAGE_KEY } from "../user-data/user-data-storage";
 
 const configured = { url: "https://demo.supabase.co", publishableKey: "sb_publishable_demo" };
 
@@ -64,18 +67,32 @@ describe("cloud-primary app integration", () => {
     expect(await screen.findByText("mateo@example.com")).toBeInTheDocument();
   });
 
-  it("keeps local recovery data when a cloud import fails and lets the athlete retry", async () => {
-    localStorage.setItem("climb4w.state.v1", JSON.stringify({ profile: { name: "Mateo" }, goals: {}, logs: [], videos: [] }));
+  it("offers every valid v3 recovery envelope for an idempotent cloud import", async () => {
+    let id = 0;
+    const envelope = migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: { schemaVersion: 1, activeRun: null, history: [] }, now: "2026-07-15T00:00:00.000Z", makeId: () => `id-${++id}` });
+    localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
     const importer: CloudImport = { import: vi.fn().mockRejectedValue({ code: "import_unavailable" }) };
     render(<App cloudImport={importer} />);
 
     expect(await screen.findByText("Importación pendiente")).toBeInTheDocument();
-    const original = localStorage.getItem("climb4w.state.v1");
+    const original = localStorage.getItem(USER_DATA_STORAGE_KEY);
     await screen.findByRole("button", { name: "Importar datos locales" }).then((button) => button.click());
     expect(await screen.findByText("No pudimos importar tus datos")).toBeInTheDocument();
-    expect(localStorage.getItem("climb4w.state.v1")).toBe(original);
+    expect(localStorage.getItem(USER_DATA_STORAGE_KEY)).toBe(original);
     await screen.findByRole("button", { name: "Reintentar importación" }).then((button) => button.click());
     await waitFor(() => expect(importer.import).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps a metadata-only import visibly retryable until its receipt completes", async () => {
+    let id = 0;
+    const envelope = migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: { schemaVersion: 1, activeRun: null, history: [] }, now: "2026-07-15T00:00:00.000Z", makeId: () => `id-${++id}` });
+    localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
+    const importer: CloudImport = { import: vi.fn(async () => ({ status: "metadata_imported" as const, receiptId: "receipt-1", pendingVideoIds: ["video-1"] })) };
+    render(<App cloudImport={importer} />);
+
+    await screen.findByRole("button", { name: "Importar datos locales" }).then((button) => button.click());
+    expect(await screen.findByText("Importación de videos pendiente")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reintentar videos" })).toBeInTheDocument();
   });
 
   it("writes a questionnaire to the cloud with a retry-safe key after saving recovery data", async () => {

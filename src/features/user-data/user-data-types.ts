@@ -76,5 +76,7 @@ export type UserDataLoadResult = {
   envelope: UserDataEnvelope;
   warning: string | null;
   migrated: boolean;
+  /** A pre-existing valid local envelope is available for cloud recovery/import. */
+  hasRecoveryEnvelope: boolean;
   canPersist: boolean;
 };
