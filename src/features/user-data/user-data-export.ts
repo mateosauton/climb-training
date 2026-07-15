@@ -43,13 +43,20 @@ function cleanUser(user: UserRecord): UserRecord {
   };
 }
 
-export function buildUserDataExport(envelope: UserDataEnvelope, exportedAt: string): string {
-  const users = Object.fromEntries(Object.keys(envelope.users).sort().map((id) => [id, cleanUser(envelope.users[id])]));
-  return JSON.stringify({
+/** The recoverable, binary-free payload accepted by the cloud import boundary. */
+export function buildLocalImportEnvelope(envelope: UserDataEnvelope): UserDataEnvelope {
+  return {
     schemaVersion: 3,
     activeUserId: envelope.activeUserId,
-    users,
-    migration: { migratedFrom: envelope.migration.migratedFrom, migratedAt: envelope.migration.migratedAt },
+    users: Object.fromEntries(Object.keys(envelope.users).sort().map((id) => [id, cleanUser(envelope.users[id])])),
+    migration: { migratedFrom: envelope.migration.migratedFrom, migratedAt: envelope.migration.migratedAt }
+  };
+}
+
+export function buildUserDataExport(envelope: UserDataEnvelope, exportedAt: string): string {
+  const local = buildLocalImportEnvelope(envelope);
+  return JSON.stringify({
+    ...local,
     app: { name: APP_NAME, exportedAt, planVersion: PLAN_VERSION }
   }, null, 2);
 }

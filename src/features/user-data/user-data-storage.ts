@@ -8,6 +8,7 @@ import { validateUserDataEnvelope } from "./user-data-validation";
 export const USER_DATA_STORAGE_KEY = "climb4w.users.v3";
 export const LEGACY_USER_DATA_STORAGE_KEY = "climb4w.users.v2";
 export const LEGACY_TRACKER_STORAGE_KEY = "climb4w.state.v1";
+export const CLOUD_IMPORT_STATUS_STORAGE_KEY = "climb4w.cloud-import.v1";
 
 type LoadOptions = {
   now: () => string;
