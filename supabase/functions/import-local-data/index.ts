@@ -3,113 +3,72 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const sourceSchema = "local-schema-3";
 const hashPattern = /^[a-f0-9]{64}$/i;
 const videoBucket = "climbing-videos";
-
+const extensions = new Set(["mp4", "mov", "webm"]);
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-type Envelope = { schemaVersion: 3; activeUserId: string; users: Record<string, User>; migration: { migratedFrom: string | null; migratedAt: string | null } };
-type User = { identity: { id: string; auth: { subject: string } | null }; facts: Fact[]; sessionLogs: SessionLog[]; videoAnalyses: Video[]; guidedSessions: Json };
-type Fact = { id: string; key: string; value: Json; unit: string | null; recordedAt: string; supersedes: string | null };
-type SessionLog = { id: string; createdAt: string; notes: string; rpe: number; pump: number; pain: number; attempts: number; moves: number; bestLink: number; footCuts: number; pullWeight: number; sleep: number; energy: number };
-type Video = { id: string; fileName: string; duration: number; size: number; createdAt: string; notes: string; footCuts: number; swing: number; hips: number; shoulder: number; breath: number; reading: number; advice: Json };
-type CompletedVideo = { id: string; checksum: string };
+type RecordValue = Record<string, unknown>;
 
-function json(status: number, value: Json): Response {
-  return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
-}
+function json(status: number, value: Json): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } }); }
+function record(value: unknown): value is RecordValue { return !!value && typeof value === "object" && !Array.isArray(value); }
+function exact(value: RecordValue, keys: string[]): boolean { return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)); }
+function finite(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function strings(value: unknown): value is string[] { return Array.isArray(value) && value.every((item) => typeof item === "string"); }
+function iso(value: unknown): value is string { return typeof value === "string" && !Number.isNaN(Date.parse(value)); }
+function stableJson(value: Json): string { if (value === null || typeof value !== "object") return JSON.stringify(value); if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`; return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`; }
+async function payloadHash(value: Json): Promise<string> { const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stableJson(value))); return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
-function record(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+function validRun(value: unknown): boolean {
+  return record(value) && exact(value, ["id", "schemaVersion", "definitionVersion", "sessionId", "status", "currentBlockIndex", "completedBlockIds", "skippedBlockIds", "startedAt", "completedAt", "activeSegmentStartedAt", "accumulatedActiveSeconds", "updatedAt"])
+    && typeof value.id === "string" && value.schemaVersion === 1 && Number.isInteger(value.definitionVersion) && typeof value.sessionId === "string"
+    && ["summary", "active", "paused", "completed"].includes(String(value.status)) && Number.isInteger(value.currentBlockIndex) && value.currentBlockIndex >= 0
+    && strings(value.completedBlockIds) && strings(value.skippedBlockIds) && [value.startedAt, value.completedAt, value.activeSegmentStartedAt].every((at) => at === null || iso(at))
+    && finite(value.accumulatedActiveSeconds) && value.accumulatedActiveSeconds >= 0 && iso(value.updatedAt);
 }
-
-function stableJson(value: Json): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+function validUser(value: unknown, id: string, athleteId: string): boolean {
+  if (!record(value) || !exact(value, ["identity", "facts", "sessionLogs", "videoAnalyses", "guidedSessions"]) || !record(value.identity) || !exact(value.identity, ["id", "displayName", "createdAt", "updatedAt", "auth"])) return false;
+  const identity = value.identity;
+  if (identity.id !== id || typeof identity.displayName !== "string" || !iso(identity.createdAt) || !iso(identity.updatedAt) || (identity.auth !== null && (!record(identity.auth) || !exact(identity.auth, ["provider", "subject", "email"]) || identity.auth.provider !== "supabase" || identity.auth.subject !== athleteId || (identity.auth.email !== null && typeof identity.auth.email !== "string")))) return false;
+  if (!Array.isArray(value.facts) || !Array.isArray(value.sessionLogs) || !Array.isArray(value.videoAnalyses) || !record(value.guidedSessions) || !exact(value.guidedSessions, ["schemaVersion", "activeRun", "history"]) || value.guidedSessions.schemaVersion !== 1 || (value.guidedSessions.activeRun !== null && !validRun(value.guidedSessions.activeRun)) || !Array.isArray(value.guidedSessions.history) || !value.guidedSessions.history.every(validRun)) return false;
+  return value.facts.every((fact) => record(fact) && exact(fact, ["id", "userId", "category", "key", "value", "unit", "recordedAt", "source", "supersedes"]) && fact.userId === id && typeof fact.id === "string" && typeof fact.key === "string" && iso(fact.recordedAt) && (fact.unit === null || typeof fact.unit === "string") && (fact.supersedes === null || typeof fact.supersedes === "string") && record(fact.source) && exact(fact.source, ["type", "field", "version"]) && typeof fact.source.type === "string" && fact.source.field === fact.key && Number.isInteger(fact.source.version))
+    && value.sessionLogs.every((log) => record(log) && exact(log, ["id", "sessionId", "createdAt", "notes", "rpe", "pump", "pain", "attempts", "moves", "bestLink", "footCuts", "pullWeight", "sleep", "energy"]) && typeof log.id === "string" && typeof log.sessionId === "string" && iso(log.createdAt) && typeof log.notes === "string" && [log.rpe, log.pump, log.pain, log.attempts, log.moves, log.bestLink, log.footCuts, log.pullWeight, log.sleep, log.energy].every(finite))
+    && value.videoAnalyses.every((video) => record(video) && exact(video, ["id", "sessionId", "createdAt", "fileName", "duration", "size", "notes", "footCuts", "swing", "hips", "shoulder", "breath", "reading", "advice"]) && typeof video.id === "string" && typeof video.sessionId === "string" && iso(video.createdAt) && typeof video.fileName === "string" && typeof video.notes === "string" && [video.duration, video.size, video.footCuts, video.swing, video.hips, video.shoulder, video.breath, video.reading].every(finite) && Array.isArray(video.advice) && video.advice.every((advice) => record(advice) && exact(advice, ["title", "body"]) && typeof advice.title === "string" && typeof advice.body === "string"));
 }
-
-async function payloadHash(value: Json): Promise<string> {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stableJson(value)));
-  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+function validEnvelope(value: unknown, athleteId: string): value is RecordValue {
+  if (!record(value) || !exact(value, ["schemaVersion", "activeUserId", "users", "migration"]) || value.schemaVersion !== 3 || typeof value.activeUserId !== "string" || !record(value.users) || !record(value.migration) || !exact(value.migration, ["migratedFrom", "migratedAt"]) || !Object.hasOwn(value.users, value.activeUserId)) return false;
+  if (![null, "climb4w.state.v1", "climb4w.users.v2"].includes(value.migration.migratedFrom as null) || (value.migration.migratedAt !== null && !iso(value.migration.migratedAt))) return false;
+  return Object.entries(value.users).every(([id, user]) => validUser(user, id, athleteId));
 }
-
-function validEnvelope(value: unknown, athleteId: string): value is Envelope {
-  if (!record(value) || value.schemaVersion !== 3 || typeof value.activeUserId !== "string" || !record(value.users) || !record(value.migration)) return false;
-  const user = value.users[value.activeUserId];
-  if (!record(user) || !record(user.identity) || user.identity.id !== value.activeUserId || !Array.isArray(user.facts) || !Array.isArray(user.sessionLogs) || !Array.isArray(user.videoAnalyses)) return false;
-  const auth = user.identity.auth;
-  if (auth !== null && (!record(auth) || typeof auth.subject !== "string" || auth.subject !== athleteId)) return false;
-  return user.facts.every((fact) => record(fact) && typeof fact.id === "string" && typeof fact.key === "string" && typeof fact.recordedAt === "string")
-    && user.sessionLogs.every((log) => record(log) && typeof log.id === "string" && typeof log.createdAt === "string" && typeof log.notes === "string")
-    && user.videoAnalyses.every((video) => record(video) && typeof video.id === "string" && typeof video.fileName === "string" && typeof video.duration === "number" && typeof video.size === "number");
-}
-
-function receiptStatus(receipt: unknown): string | null {
-  return record(receipt) && typeof receipt.status === "string" ? receipt.status : null;
-}
+function safeExtension(fileName: string): string | null { const ext = fileName.trim().split(".").pop()?.toLowerCase(); return ext && extensions.has(ext) ? ext : null; }
+async function objectChecksum(admin: ReturnType<typeof createClient>, path: string): Promise<string> { const { data, error } = await admin.storage.from(videoBucket).download(path); if (error || !data) throw new Error("object_missing"); const digest = await crypto.subtle.digest("SHA-256", await data.arrayBuffer()); return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
 Deno.serve(async (request) => {
   if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return json(401, { error: "unauthenticated" });
-  const token = authorization.slice("Bearer ".length);
-  const url = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const url = Deno.env.get("SUPABASE_URL"), anonKey = Deno.env.get("SUPABASE_ANON_KEY"), serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !anonKey || !serviceRole) return json(500, { error: "import_unavailable" });
-
   const authClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } });
-  const { data: userData, error: userError } = await authClient.auth.getUser(token);
-  if (userError || !userData.user) return json(401, { error: "unauthenticated" });
-  const athleteId = userData.user.id;
-
-  let body: { sourceSchema?: unknown; payloadHash?: unknown; envelope?: unknown; completedVideos?: unknown };
-  try { body = await request.json(); } catch { return json(400, { error: "invalid_import" }); }
-  if (body.sourceSchema !== sourceSchema || typeof body.payloadHash !== "string" || !hashPattern.test(body.payloadHash) || !validEnvelope(body.envelope, athleteId)) return json(400, { error: "invalid_import" });
-  if (await payloadHash(body.envelope as Json) !== body.payloadHash.toLowerCase()) return json(400, { error: "invalid_import" });
-
+  const { data: auth, error: authError } = await authClient.auth.getUser(authorization.slice(7));
+  if (authError || !auth.user) return json(401, { error: "unauthenticated" });
+  let body: RecordValue; try { const candidate = await request.json(); if (!record(candidate)) throw new Error(); body = candidate; } catch { return json(400, { error: "invalid_import" }); }
+  const athleteId = auth.user.id;
+  if (body.sourceSchema !== sourceSchema || typeof body.payloadHash !== "string" || !hashPattern.test(body.payloadHash) || !validEnvelope(body.envelope, athleteId) || await payloadHash(body.envelope as Json) !== body.payloadHash.toLowerCase()) return json(400, { error: "invalid_import" });
   const admin = createClient(url, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data: existing, error: lookupError } = await admin.from("import_receipts").select("id, receipt").eq("athlete_id", athleteId).eq("source_schema", sourceSchema).eq("payload_hash", body.payloadHash.toLowerCase()).maybeSingle();
-  if (lookupError) return json(503, { error: "import_unavailable" });
-
-  let receipt = existing;
-  if (!receipt) {
-    const { data, error } = await admin.from("import_receipts").insert({ athlete_id: athleteId, source_schema: sourceSchema, payload_hash: body.payloadHash.toLowerCase(), receipt: { status: "received" } }).select("id, receipt").single();
-    if (error) {
-      const retry = await admin.from("import_receipts").select("id, receipt").eq("athlete_id", athleteId).eq("source_schema", sourceSchema).eq("payload_hash", body.payloadHash.toLowerCase()).maybeSingle();
-      if (retry.error || !retry.data) return json(503, { error: "import_unavailable" });
-      receipt = retry.data;
-    } else receipt = data;
-  }
-  if (!receipt) return json(503, { error: "import_unavailable" });
-  if (receiptStatus(receipt.receipt) === "completed") return json(200, { status: "completed", receiptId: receipt.id, pendingVideoIds: [] });
-
-  const user = (body.envelope as Envelope).users[(body.envelope as Envelope).activeUserId];
-  if (receiptStatus(receipt.receipt) === "received") {
-    const facts = user.facts.map((fact) => ({ athlete_id: athleteId, fact_key: fact.key, value: fact.value, source: { type: "import", field: fact.key, version: 3, local_id: fact.id, recorded_at: fact.recordedAt, unit: fact.unit, supersedes: fact.supersedes } }));
-    const logs = user.sessionLogs.map((log) => ({ athlete_id: athleteId, body: log.notes || null, rpe: log.rpe, pump: log.pump, pain: log.pain, energy: log.energy, metrics: { imported_source_id: log.id, created_at: log.createdAt, attempts: log.attempts, moves: log.moves, best_link: log.bestLink, foot_cuts: log.footCuts, pull_weight: log.pullWeight, sleep: log.sleep } }));
-    // Receipt creation is the idempotency claim. These writes are only reached by its owner; retries resume from the receipt.
-    if ((facts.length && (await admin.from("athlete_facts").insert(facts)).error) || (logs.length && (await admin.from("session_logs").insert(logs)).error)) return json(503, { error: "import_unavailable" });
-    const { error } = await admin.from("import_receipts").update({ receipt: { status: "metadata_imported", counts: { facts: facts.length, logs: logs.length, guided_runs: Array.isArray((user.guidedSessions as Record<string, unknown>).history) ? (user.guidedSessions as Record<string, unknown>).history.length : 0, videos: user.videoAnalyses.length }, source_ids: { facts: user.facts.map((fact) => fact.id), logs: user.sessionLogs.map((log) => log.id), videos: user.videoAnalyses.map((video) => video.id) } } }).eq("id", receipt.id).eq("athlete_id", athleteId);
-    if (error) return json(503, { error: "import_unavailable" });
-    receipt.receipt = { status: "metadata_imported" };
-  }
-
-  const pendingVideoIds = user.videoAnalyses.map((video) => video.id);
-  const completedVideos = body.completedVideos;
-  if (!Array.isArray(completedVideos) || completedVideos.length === 0) return json(200, { status: "metadata_imported", receiptId: receipt.id, pendingVideoIds });
-  if (!completedVideos.every((video): video is CompletedVideo => record(video) && typeof video.id === "string" && typeof video.checksum === "string" && hashPattern.test(video.checksum) && pendingVideoIds.includes(video.id))) return json(400, { error: "invalid_import" });
-  if (completedVideos.length !== pendingVideoIds.length) return json(200, { status: "metadata_imported", receiptId: receipt.id, pendingVideoIds });
-
-  const videoRows = [];
-  for (const completed of completedVideos) {
-    const video = user.videoAnalyses.find((candidate) => candidate.id === completed.id)!;
-    const objectPath = `${athleteId}/${receipt.id}/${video.id}`;
-    const { data: objects, error } = await admin.storage.from(videoBucket).list(`${athleteId}/${receipt.id}`, { search: video.id });
-    if (error || !objects?.some((object) => object.name === video.id)) return json(409, { error: "video_upload_pending" });
-    videoRows.push({ athlete_id: athleteId, object_path: objectPath, checksum: completed.checksum.toLowerCase(), mime_type: "video/mp4", byte_size: video.size, duration_seconds: Math.max(0, Math.round(video.duration)), upload_status: "uploaded", processing_status: "pending", sanitized_failure: null });
-  }
-  const { error: videoError } = await admin.from("video_assets").upsert(videoRows, { onConflict: "object_path" });
-  if (videoError) return json(503, { error: "import_unavailable" });
-  const { error: completeError } = await admin.from("import_receipts").update({ receipt: { status: "completed", completed_video_ids: pendingVideoIds } }).eq("id", receipt.id).eq("athlete_id", athleteId);
-  if (completeError) return json(503, { error: "import_unavailable" });
-  return json(200, { status: "completed", receiptId: receipt.id, pendingVideoIds: [] });
+  const { data: metadata, error: metadataError } = await admin.rpc("import_local_metadata", { p_athlete_id: athleteId, p_source_schema: sourceSchema, p_payload_hash: body.payloadHash.toLowerCase(), p_envelope: body.envelope });
+  if (metadataError || !record(metadata) || typeof metadata.receiptId !== "string" || !Array.isArray(metadata.pendingVideoIds)) return json(503, { error: "import_unavailable" });
+  if (metadata.status === "completed") return json(200, metadata as Json);
+  const completedIds = body.completedVideoIds;
+  if (!Array.isArray(completedIds) || completedIds.length === 0) return json(200, metadata as Json);
+  const videos = (body.envelope as RecordValue).users as RecordValue;
+  const active = videos[(body.envelope as RecordValue).activeUserId] as RecordValue;
+  if (!completedIds.every((id) => typeof id === "string") || new Set(completedIds).size !== completedIds.length || completedIds.length !== metadata.pendingVideoIds.length || !completedIds.every((id) => metadata.pendingVideoIds.includes(id))) return json(400, { error: "invalid_import" });
+  try {
+    const verified = await Promise.all((active.videoAnalyses as RecordValue[]).filter((video) => completedIds.includes(video.id as string)).map(async (video) => {
+      const extension = safeExtension(video.fileName as string); if (!extension) throw new Error("invalid_video");
+      const path = `${athleteId}/${video.id}/original.${extension}`;
+      return { id: video.id, path, checksum: await objectChecksum(admin, path), mime_type: `video/${extension === "mov" ? "quicktime" : extension}`, byte_size: Math.max(0, Math.round(video.size as number)), duration_seconds: Math.max(0, Math.round(video.duration as number)) };
+    }));
+    const { error } = await admin.rpc("complete_local_import_videos", { p_athlete_id: athleteId, p_receipt_id: metadata.receiptId, p_videos: verified });
+    if (error) return json(409, { error: "video_upload_pending" });
+  } catch { return json(409, { error: "video_upload_pending" }); }
+  return json(200, { status: "completed", receiptId: metadata.receiptId, pendingVideoIds: [] });
 });

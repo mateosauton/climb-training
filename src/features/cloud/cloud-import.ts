@@ -19,7 +19,7 @@ export interface CloudImportClient {
   };
 }
 
-export type CloudImport = { import(envelope: unknown): Promise<ImportResult> };
+export type CloudImport = { import(envelope: unknown, completedVideoIds?: string[]): Promise<ImportResult> };
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value);
@@ -66,14 +66,14 @@ function hasMismatchedIdentity(envelope: UserDataEnvelope, athleteId: string | u
 
 export function createCloudImport(client: CloudImportClient, storage: Storage, athleteId?: () => string | undefined): CloudImport {
   return {
-    async import(value: unknown): Promise<ImportResult> {
+    async import(value: unknown, completedVideoIds?: string[]): Promise<ImportResult> {
       const canonical = await canonicalizeLocalImport(value);
       if (hasMismatchedIdentity(canonical.envelope, athleteId?.())) throw { code: "invalid_import" };
       const alreadyCompleted = completedStatus(storage, canonical.payloadHash);
       if (alreadyCompleted) return alreadyCompleted;
 
       const { data, error } = await client.functions.invoke("import-local-data", {
-        body: { sourceSchema: canonical.sourceSchema, payloadHash: canonical.payloadHash, envelope: canonical.envelope }
+        body: { sourceSchema: canonical.sourceSchema, payloadHash: canonical.payloadHash, envelope: canonical.envelope, ...(completedVideoIds ? { completedVideoIds } : {}) }
       });
       if (error || !data || !["metadata_imported", "completed"].includes(data.status) || typeof data.receiptId !== "string" || !Array.isArray(data.pendingVideoIds)) {
         throw { code: "import_unavailable" };
