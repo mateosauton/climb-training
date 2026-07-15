@@ -42,11 +42,11 @@ export function migrateLegacyUserData(options: {
   }
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     activeUserId: userId,
     users: {
       [userId]: {
-        identity: { id: userId, displayName: tracker.profile.name || "Usuario local", createdAt: now, updatedAt: now },
+        identity: { id: userId, displayName: tracker.profile.name || "Usuario local", createdAt: now, updatedAt: now, auth: null },
         facts,
         sessionLogs: clone(tracker.logs),
         videoAnalyses: tracker.videos.map((video) => ({

@@ -10,7 +10,7 @@ const source = { type: "profile-form" as const, version: 1 };
 
 function record(id = "user-a", facts: UserFact[] = []): UserRecord {
   return {
-    identity: { id, displayName: "Mateo", createdAt: now, updatedAt: now },
+    identity: { id, displayName: "Mateo", createdAt: now, updatedAt: now, auth: null },
     facts,
     sessionLogs: [],
     videoAnalyses: [],

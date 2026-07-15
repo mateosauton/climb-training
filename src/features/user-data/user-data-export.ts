@@ -19,7 +19,13 @@ function guidedState(state: GuidedSessionState): GuidedSessionState {
 
 function cleanUser(user: UserRecord): UserRecord {
   return {
-    identity: { id: user.identity.id, displayName: user.identity.displayName, createdAt: user.identity.createdAt, updatedAt: user.identity.updatedAt },
+    identity: {
+      id: user.identity.id,
+      displayName: user.identity.displayName,
+      createdAt: user.identity.createdAt,
+      updatedAt: user.identity.updatedAt,
+      auth: user.identity.auth ? { ...user.identity.auth } : null
+    },
     facts: user.facts.map((fact) => ({
       id: fact.id, userId: fact.userId, category: fact.category, key: fact.key, value: Array.isArray(fact.value) ? [...fact.value] : fact.value,
       unit: fact.unit, recordedAt: fact.recordedAt, source: { type: fact.source.type, field: fact.source.field, version: fact.source.version }, supersedes: fact.supersedes
@@ -40,7 +46,7 @@ function cleanUser(user: UserRecord): UserRecord {
 export function buildUserDataExport(envelope: UserDataEnvelope, exportedAt: string): string {
   const users = Object.fromEntries(Object.keys(envelope.users).sort().map((id) => [id, cleanUser(envelope.users[id])]));
   return JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     activeUserId: envelope.activeUserId,
     users,
     migration: { migratedFrom: envelope.migration.migratedFrom, migratedAt: envelope.migration.migratedAt },

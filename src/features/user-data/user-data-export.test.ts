@@ -13,7 +13,7 @@ describe("user data export", () => {
     envelope.users[envelope.activeUserId].videoAnalyses.push({ id: "video", sessionId: "w1d1", createdAt: exportedAt, fileName: "move.mp4", duration: 10, size: 100, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [{ title: "Cadera", body: "Acercala al muro." }] });
     const first = buildUserDataExport(envelope, exportedAt);
     expect(buildUserDataExport(envelope, exportedAt)).toBe(first);
-    expect(first).toContain('\n  "schemaVersion": 2,');
+    expect(first).toContain('\n  "schemaVersion": 3,');
     expect(JSON.parse(first)).toEqual({ ...envelope, app: { name: "Escalada 4W Tracker", exportedAt, planVersion: "2026-07-09/2026-08-05" } });
     expect(JSON.parse(first).users[envelope.activeUserId].videoAnalyses[0].advice).toEqual([{ title: "Cadera", body: "Acercala al muro." }]);
   });
