@@ -122,6 +122,7 @@ import { buildUserDataExport, userDataExportFilename } from "@/features/user-dat
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
 import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
 import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
+import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import {
   defaultState,
   exerciseLibrary,
@@ -1237,6 +1238,7 @@ export default function App() {
   const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
   const [logForm, setLogForm] = useState(defaultLogValues);
   const [logError, setLogError] = useState("");
+  const [savedRecommendation, setSavedRecommendation] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
@@ -1537,6 +1539,7 @@ export default function App() {
   }
 
   function loadLogForSession(sessionId) {
+    setSavedRecommendation(null);
     const latest = (logsBySession.get(sessionId) || []).at(-1);
     if (!latest) {
       setLogForm(defaultLogValues);
@@ -1578,12 +1581,19 @@ export default function App() {
       ...values
     };
     updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
+    setSavedRecommendation({
+      log,
+      session: selectedSession,
+      assessment: buildSessionRecommendation(log, selectedSession)
+    });
+    setLogForm(defaultLogValues);
     setLogError("");
   }
 
   function clearLogForm() {
     setLogForm(defaultLogValues);
     setLogError("");
+    setSavedRecommendation(null);
   }
 
   function handleVideoFile(event) {
@@ -1711,6 +1721,7 @@ export default function App() {
     setUserData(next);
     setQuestionnaireOpen(true);
     setLogForm(defaultLogValues);
+    setSavedRecommendation(null);
     setVideoFile(null);
     setVideoUrl("");
     setVideoMeta(null);
@@ -2265,6 +2276,24 @@ export default function App() {
                 <CardDescription>Guarda carga, dolor, link y notas tecnicas.</CardDescription>
               </CardHeader>
               <CardContent>
+                {savedRecommendation ? (
+                  <div className="space-y-5 rounded-xl border border-primary/30 bg-primary/5 p-5">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="mt-0.5 size-6 shrink-0 text-primary" />
+                      <div>
+                        <h3 className="font-semibold">Log guardado</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Tus datos se guardaron y el formulario quedó listo para una nueva sesión.
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-sm font-medium">¿Qué quieres hacer ahora?</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" onClick={clearLogForm}>Registrar otra sesión</Button>
+                      <Button type="button" variant="outline" onClick={() => setActiveTab("dashboard")}>Continuar</Button>
+                    </div>
+                  </div>
+                ) : (
                 <form className="space-y-4" onSubmit={submitLog}>
                   <Field label="Dia del plan" htmlFor="log-session" help={logFieldHelp.session}>
                     <SessionSelect
@@ -2343,51 +2372,48 @@ export default function App() {
                       <Save className="size-4" />
                       Guardar log
                     </Button>
-                    <Button type="button" variant="outline" onClick={clearLogForm}>
-                      <RefreshCcw className="size-4" />
-                      Limpiar
-                    </Button>
                   </div>
                 </form>
+                )}
               </CardContent>
             </Card>
 
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
-                <CardTitle>Historial</CardTitle>
-                <CardDescription>Ultimas sesiones cargadas.</CardDescription>
+                <CardTitle>Evaluación de tu sesión</CardTitle>
+                <CardDescription>Recomendación IA según el objetivo planificado y tu registro.</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[34rem] pr-3">
-                  <div className="space-y-3">
-                    {!state.logs.length ? (
-                      <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                        Sin logs todavia.
+                {savedRecommendation ? (
+                  <div className="space-y-5" aria-live="polite">
+                    <div className="flex items-center gap-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+                      <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground">
+                        {savedRecommendation.assessment.score}/10
                       </div>
-                    ) : (
-                      [...state.logs].reverse().map((log) => {
-                        const session = sessionById(log.sessionId);
-                        return (
-                          <article key={log.id} className="rounded-lg border border-border/70 bg-background/50 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <h3 className="font-medium">{session.title.replace("Escalada ", "")}</h3>
-                                <p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString("es-AR")}</p>
-                              </div>
-                              <Badge variant="outline">RPE {log.rpe}</Badge>
-                            </div>
-                            <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-                              <span>Link {log.bestLink}</span>
-                              <span>Dolor {log.pain}</span>
-                              <span>Pies {log.footCuts}</span>
-                            </div>
-                            {log.notes ? <p className="mt-2 text-sm text-muted-foreground">{log.notes}</p> : null}
-                          </article>
-                        );
-                      })
-                    )}
+                      <div>
+                        <p className="font-semibold">{savedRecommendation.session.title.replace("Escalada ", "")}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">{savedRecommendation.assessment.summary}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">En qué enfocarte</h3>
+                      <div className="mt-3 space-y-3">
+                        {savedRecommendation.assessment.recommendations.map((recommendation, index) => (
+                          <div key={recommendation} className="flex gap-3 rounded-lg border border-border/70 bg-background/50 p-3 text-sm">
+                            <Badge className="mt-0.5 size-6 shrink-0 justify-center rounded-full p-0" variant="outline">{index + 1}</Badge>
+                            <p>{recommendation}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </ScrollArea>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border p-6 text-center">
+                    <Gauge className="mx-auto size-8 text-primary" />
+                    <p className="mt-3 font-medium">Guarda una sesión para recibir tu evaluación</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Compararemos carga, resultado, técnica, dolor y recuperación con el objetivo del día.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </section>
