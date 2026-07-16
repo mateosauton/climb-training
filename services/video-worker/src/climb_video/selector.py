@@ -8,7 +8,7 @@ import numpy as np
 
 from climb_video.contracts import EvidenceFrame, EvidenceSequence
 from climb_video.media import ExtractedFrame
-from climb_video.training import validate_artifact
+from climb_video.training import artifact_is_accepted, validate_artifact
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,13 @@ class ContactTransitionPrior:
 
 def load_default_prior() -> ContactTransitionPrior | None:
     path = Path(__file__).parent / "models" / "contact-transition-v1.json"
-    return ContactTransitionPrior.load(path) if path.exists() else None
+    return load_prior(path) if path.exists() else None
+
+
+def load_prior(path: Path) -> ContactTransitionPrior | None:
+    artifact = json.loads(path.read_text(encoding="utf-8"))
+    validate_artifact(artifact)
+    return ContactTransitionPrior.load(path) if artifact_is_accepted(artifact) else None
 
 
 def select_evidence(

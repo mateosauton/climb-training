@@ -14,10 +14,13 @@ from typing import Any
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 from climb_video.media import score_frame
 
 FEATURES = ["log1p_blur", "exposure", "log1p_motion"]
+MIN_VALIDATION_ROC_AUC = 0.55
+MIN_VALIDATION_BALANCED_ACCURACY = 0.55
 
 
 @dataclass(frozen=True)
@@ -46,8 +49,8 @@ def split_participants(participants: list[str], *, seed: int) -> dict[str, list[
     }
 
 
-def _sigmoid(values: np.ndarray) -> np.ndarray:
-    return 1 / (1 + np.exp(-np.clip(values, -30, 30)))
+def _sigmoid(values: NDArray[np.float64]) -> NDArray[np.float64]:
+    return np.asarray(1 / (1 + np.exp(-np.clip(values, -30, 30))), dtype=np.float64)
 
 
 def _metrics(labels: np.ndarray, probabilities: np.ndarray, threshold: float) -> dict[str, float]:
@@ -124,7 +127,7 @@ def fit_contact_prior(
     for name in ("validation", "test"):
         labels, probs = probabilities(by_split[name])
         metrics[name] = _metrics(labels, probs, float(threshold))
-    return {
+    artifact = {
         "schema_version": 1,
         "model_id": "contact-transition-prior",
         "version": "1.0.0",
@@ -153,6 +156,21 @@ def fit_contact_prior(
         },
         "metrics": metrics,
     }
+    artifact["deployment"] = {
+        "accepted": artifact_is_accepted(artifact),
+        "minimum_validation_roc_auc": MIN_VALIDATION_ROC_AUC,
+        "minimum_validation_balanced_accuracy": MIN_VALIDATION_BALANCED_ACCURACY,
+    }
+    return artifact
+
+
+def artifact_is_accepted(artifact: dict[str, Any]) -> bool:
+    validation = artifact.get("metrics", {}).get("validation", {})
+    return (
+        float(validation.get("roc_auc", 0)) >= MIN_VALIDATION_ROC_AUC
+        and float(validation.get("balanced_accuracy", 0))
+        >= MIN_VALIDATION_BALANCED_ACCURACY
+    )
 
 
 def validate_artifact(artifact: dict[str, Any]) -> None:

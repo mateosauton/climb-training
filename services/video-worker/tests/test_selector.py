@@ -1,7 +1,9 @@
+import json
+
 import numpy as np
 
 from climb_video.media import ExtractedFrame, FrameScore
-from climb_video.selector import ContactTransitionPrior, select_evidence
+from climb_video.selector import ContactTransitionPrior, load_prior, select_evidence
 
 
 def candidate(index: int, digest: str | None = None) -> ExtractedFrame:
@@ -53,3 +55,17 @@ def test_trained_prior_ranks_late_transition_across_full_clip() -> None:
     )
     sequences = select_evidence(frames, sequence_size=5, max_sequences=1, prior=prior)
     assert any(frame.frame_index == 90 for frame in sequences[0].frames)
+
+
+def test_loader_does_not_enable_rejected_artifact(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    artifact = {
+        "schema_version": 1,
+        "features": ["log1p_blur", "exposure", "log1p_motion"],
+        "dataset": {"license": "CC-BY-4.0"},
+        "preprocessing": {"means": [0, 0, 0], "scales": [1, 1, 1]},
+        "model": {"coefficients": [0, 0, 1], "intercept": 0},
+        "metrics": {"validation": {"roc_auc": 0.53, "balanced_accuracy": 0.51}},
+    }
+    path = tmp_path / "prior.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    assert load_prior(path) is None

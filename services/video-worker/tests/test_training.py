@@ -3,6 +3,7 @@ import pytest
 
 from climb_video.training import (
     TrainingSample,
+    artifact_is_accepted,
     fit_contact_prior,
     participant_group,
     split_participants,
@@ -40,6 +41,7 @@ def test_fit_produces_real_weights_metrics_and_no_demographics() -> None:
     assert 0 <= artifact["metrics"]["test"]["balanced_accuracy"] <= 1
     assert 0 <= artifact["metrics"]["test"]["precision"] <= 1
     assert 0 <= artifact["metrics"]["test"]["recall"] <= 1
+    assert artifact_is_accepted(artifact)
 
     def keys(value):  # type: ignore[no-untyped-def]
         if isinstance(value, dict):
@@ -54,3 +56,12 @@ def test_fit_produces_real_weights_metrics_and_no_demographics() -> None:
 def test_artifact_validation_rejects_wrong_features() -> None:
     with pytest.raises(ValueError, match="features"):
         validate_artifact({"schema_version": 1, "features": ["bad"]})
+
+
+def test_quality_gate_rejects_weak_validation_metrics() -> None:
+    artifact = {
+        "metrics": {
+            "validation": {"roc_auc": 0.53, "balanced_accuracy": 0.51},
+        }
+    }
+    assert not artifact_is_accepted(artifact)
