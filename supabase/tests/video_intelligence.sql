@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(13);
+select plan(15);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -71,6 +71,18 @@ select ok(
   has_function_privilege('service_role', 'public.finalize_video_analysis_job(uuid,jsonb)', 'EXECUTE')
   and not has_function_privilege('authenticated', 'public.finalize_video_analysis_job(uuid,jsonb)', 'EXECUTE'),
   'only service role can finalize jobs'
+);
+
+select ok(
+  has_function_privilege('service_role', 'public.get_reviewed_climbing_knowledge()', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.get_reviewed_climbing_knowledge()', 'EXECUTE'),
+  'only service role can read reviewed climbing knowledge'
+);
+
+select is(
+  jsonb_array_length(public.get_reviewed_climbing_knowledge()) >= 3,
+  true,
+  'reviewed coaching knowledge is seeded with attributable entries'
 );
 
 select ok(

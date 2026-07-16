@@ -1,6 +1,70 @@
 create extension if not exists pgmq;
+create extension if not exists vector with schema extensions;
 
 select pgmq.create('video_analysis');
+
+create table private.climbing_knowledge_sources (
+  id text primary key check (id ~ '^knowledge:[a-z0-9][a-z0-9-]+$'),
+  title text not null check (char_length(title) > 0),
+  source_url text not null check (source_url like 'https://%'),
+  source_license text not null check (char_length(source_license) > 0),
+  review_status text not null default 'pending'
+    check (review_status in ('pending', 'approved', 'rejected', 'retired')),
+  reviewed_by text,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  check ((review_status = 'approved') = (reviewed_at is not null))
+);
+
+create table private.climbing_knowledge_chunks (
+  id text primary key check (id ~ '^knowledge:[a-z0-9][a-z0-9-]+$'),
+  source_id text not null references private.climbing_knowledge_sources(id) on delete cascade,
+  content text not null check (char_length(content) between 20 and 2000),
+  content_hash text not null check (content_hash ~ '^[[:xdigit:]]{64}$'),
+  review_status text not null default 'pending'
+    check (review_status in ('pending', 'approved', 'rejected', 'retired')),
+  embedding extensions.vector(384),
+  embedding_model text,
+  created_at timestamptz not null default now()
+);
+
+insert into private.climbing_knowledge_sources (
+  id, title, source_url, source_license, review_status, reviewed_by, reviewed_at
+) values
+  (
+    'knowledge:physical-testing-review',
+    'Physical performance testing in climbing — systematic review',
+    'https://pmc.ncbi.nlm.nih.gov/articles/PMC10203485/',
+    'CC BY 4.0', 'approved', 'system-seed-v1', now()
+  ),
+  (
+    'knowledge:performance-determinants-review',
+    'Sport climbing performance determinants and functional testing methods',
+    'https://pmc.ncbi.nlm.nih.gov/articles/PMC11904605/',
+    'Open-access source; authored paraphrase only', 'approved', 'system-seed-v1', now()
+  );
+
+insert into private.climbing_knowledge_chunks (
+  id, source_id, content, content_hash, review_status
+) values
+  (
+    'knowledge:testing-specificity', 'knowledge:physical-testing-review',
+    'Use climbing-specific tests and interpret them in the context of ability level, wall angle, route demands, and protocol. Do not treat a single general test as a complete measure of climbing ability.',
+    encode(sha256(convert_to('Use climbing-specific tests and interpret them in the context of ability level, wall angle, route demands, and protocol. Do not treat a single general test as a complete measure of climbing ability.', 'utf8')), 'hex'),
+    'approved'
+  ),
+  (
+    'knowledge:finger-strength-testing', 'knowledge:physical-testing-review',
+    'For monitoring finger maximum strength, applying force to a climbing hold is more specific than a general hand dynamometer. Keep test setup consistent before comparing sessions.',
+    encode(sha256(convert_to('For monitoring finger maximum strength, applying force to a climbing hold is more specific than a general hand dynamometer. Keep test setup consistent before comparing sessions.', 'utf8')), 'hex'),
+    'approved'
+  ),
+  (
+    'knowledge:performance-is-multifactorial', 'knowledge:performance-determinants-review',
+    'Climbing performance is multifactorial. Technique and attention interact with climbing-specific strength, endurance, power, and cardiorespiratory capacity, so coaching should not infer a single cause from one visible movement.',
+    encode(sha256(convert_to('Climbing performance is multifactorial. Technique and attention interact with climbing-specific strength, endurance, power, and cardiorespiratory capacity, so coaching should not infer a single cause from one visible movement.', 'utf8')), 'hex'),
+    'approved'
+  );
 
 create table private.video_analysis_jobs (
   id uuid primary key default gen_random_uuid(),
@@ -178,6 +242,33 @@ create policy "athletes append own recommendation feedback"
 create policy "athletes read own video themes"
   on public.video_theme_snapshots for select to authenticated
   using ((select auth.uid()) = athlete_id);
+
+create function public.get_reviewed_climbing_knowledge()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', chunk.id,
+        'content', chunk.content,
+        'source_url', source.source_url
+      ) order by chunk.id
+    ),
+    '[]'::jsonb
+  )
+  from (
+    select * from private.climbing_knowledge_chunks
+    where review_status = 'approved'
+    order by id
+    limit 20
+  ) chunk
+  join private.climbing_knowledge_sources source on source.id = chunk.source_id
+  where source.review_status = 'approved';
+$$;
 
 create function public.request_video_analysis(
   p_video_asset_id uuid,
@@ -454,9 +545,11 @@ revoke all on schema private from public, anon, authenticated;
 revoke all on all tables in schema private from public, anon, authenticated;
 revoke all on function public.request_video_analysis(uuid, text) from public, anon;
 grant execute on function public.request_video_analysis(uuid, text) to authenticated;
+revoke all on function public.get_reviewed_climbing_knowledge() from public, anon, authenticated;
 revoke all on function public.claim_video_analysis_job(text, integer) from public, anon, authenticated;
 revoke all on function public.checkpoint_video_analysis_job(uuid, text, integer, jsonb) from public, anon, authenticated;
 revoke all on function public.finalize_video_analysis_job(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.claim_video_analysis_job(text, integer) to service_role;
+grant execute on function public.get_reviewed_climbing_knowledge() to service_role;
 grant execute on function public.checkpoint_video_analysis_job(uuid, text, integer, jsonb) to service_role;
 grant execute on function public.finalize_video_analysis_job(uuid, jsonb) to service_role;
