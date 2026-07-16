@@ -124,8 +124,11 @@ import { createUserGuidedStorage } from "@/features/user-data/user-guided-storag
 import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
 import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
-import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
+import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
+import { readAuthConfig } from "@/features/auth/auth-config";
+import { createCloudClient } from "@/features/cloud/cloud-client";
+import { createCloudVideoService } from "@/features/cloud/cloud-video";
 import {
   defaultState,
   exerciseLibrary,
