@@ -252,6 +252,7 @@ as $$
 declare
   v_message record;
   v_job private.video_analysis_jobs;
+  v_object_path text;
 begin
   if char_length(coalesce(p_worker_id, '')) = 0
     or p_visibility_seconds not between 30 and 86400 then
@@ -282,10 +283,15 @@ begin
   set state = v_job.state, stage = v_job.stage, progress = v_job.progress, updated_at = now()
   where job_id = v_job.id;
 
+  select object_path into v_object_path
+  from public.video_assets
+  where id = v_job.video_asset_id and athlete_id = v_job.athlete_id;
+
   return jsonb_build_object(
-    'job_id', v_job.id, 'athlete_id', v_job.athlete_id,
-    'video_asset_id', v_job.video_asset_id, 'attempt_count', v_job.attempt_count,
-    'correlation_id', v_job.correlation_id
+    'job_id', v_job.id, 'video_asset_id', v_job.video_asset_id,
+    'attempt_count', v_job.attempt_count, 'correlation_id', v_job.correlation_id,
+    'bucket', 'climbing-videos', 'object_path', v_object_path,
+    'checkpoint', v_job.checkpoints
   );
 end;
 $$;
