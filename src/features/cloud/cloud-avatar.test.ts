@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { avatarPath, createAvatarSignedUrl, uploadAvatar, validateAvatarFile } from "./cloud-avatar";
+import { avatarPath, createAvatarSignedUrl, uploadAvatar, validateAvatarFile, type CloudAvatarError } from "./cloud-avatar";
 
 function fakeClient() {
   const upload = vi.fn().mockResolvedValue({ data: null, error: null });
@@ -28,13 +28,14 @@ describe("profile photo files", () => {
 
   it("rejects unsupported MIME types", () => {
     expect(() => validateAvatarFile(new File(["photo"], "photo.gif", { type: "image/gif" })))
-      .toThrow("invalid_avatar_file");
+      .toThrowError(expect.objectContaining<CloudAvatarError>({ code: "invalid_avatar_file" }));
   });
 
   it("rejects files larger than 5 MiB", () => {
     const file = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "photo.jpg", { type: "image/jpeg" });
 
-    expect(() => validateAvatarFile(file)).toThrow("avatar_too_large");
+    expect(() => validateAvatarFile(file))
+      .toThrowError(expect.objectContaining<CloudAvatarError>({ code: "avatar_too_large" }));
   });
 });
 
@@ -56,5 +57,13 @@ describe("cloud avatar storage", () => {
 
     await expect(createAvatarSignedUrl(fake.client, "athlete-1/avatar.webp")).resolves.toBe("https://signed.example/avatar");
     expect(fake.createSignedUrl).toHaveBeenCalledWith("athlete-1/avatar.webp", 60);
+  });
+
+  it("returns the same discriminated error shape for storage failures", async () => {
+    const fake = fakeClient();
+    fake.upload.mockResolvedValueOnce({ data: null, error: { message: "provider detail" } });
+
+    await expect(uploadAvatar(fake.client, "athlete-1", new File(["photo"], "photo.jpg", { type: "image/jpeg" })))
+      .rejects.toEqual({ code: "unavailable" } satisfies CloudAvatarError);
   });
 });

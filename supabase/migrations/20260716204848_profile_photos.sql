@@ -44,6 +44,23 @@ $$;
 revoke all on function public.update_avatar_path(text) from public;
 grant execute on function public.update_avatar_path(text) to authenticated;
 
+create or replace function public.hydrate_athlete_state()
+returns jsonb language sql stable security invoker set search_path = '' as $$
+  select jsonb_build_object(
+    'facts', coalesce((select jsonb_agg(to_jsonb(f) order by f.created_at)
+      from public.athlete_facts f where f.athlete_id = auth.uid()), '[]'::jsonb),
+    'sessionLogs', coalesce((select jsonb_agg(to_jsonb(l) order by l.created_at)
+      from public.session_logs l where l.athlete_id = auth.uid()), '[]'::jsonb),
+    'guided', coalesce((select state from public.athlete_guided_states where athlete_id = auth.uid()),
+      '{"schemaVersion":1,"activeRun":null,"history":[]}'::jsonb),
+    'activePlan', (select to_jsonb(p) from public.training_plans p
+      where p.athlete_id = auth.uid() and p.status = 'active'),
+    'profile', jsonb_build_object(
+      'avatarPath', (select avatar_path from public.athlete_profiles where athlete_id = auth.uid())
+    )
+  );
+$$;
+
 create policy "athletes read own profile photos"
   on storage.objects for select to authenticated
   using (

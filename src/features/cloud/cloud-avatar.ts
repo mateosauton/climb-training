@@ -10,6 +10,13 @@ const extensionsByMime = {
 
 type CloudResult<T = unknown> = { data: T; error: unknown | null };
 export type AvatarFile = Blob & { name: string; type: string; size: number };
+export type CloudAvatarError = {
+  code: "invalid_avatar_file" | "avatar_too_large" | "invalid_avatar_path" | "unavailable";
+};
+
+function failure(code: CloudAvatarError["code"]): CloudAvatarError {
+  return { code };
+}
 
 export interface CloudAvatarClient {
   storage: {
@@ -22,13 +29,13 @@ export interface CloudAvatarClient {
 
 export function validateAvatarFile(file: AvatarFile): "jpg" | "png" | "webp" {
   const extension = extensionsByMime[file.type as keyof typeof extensionsByMime];
-  if (!extension) throw new Error("invalid_avatar_file");
-  if (file.size > MAX_AVATAR_BYTES) throw new Error("avatar_too_large");
+  if (!extension) throw failure("invalid_avatar_file");
+  if (file.size > MAX_AVATAR_BYTES) throw failure("avatar_too_large");
   return extension;
 }
 
 export function avatarPath(athleteId: string, file: AvatarFile): string {
-  if (!athleteId.trim()) throw new Error("invalid_avatar_path");
+  if (!athleteId.trim()) throw failure("invalid_avatar_path");
   return `${athleteId}/avatar.${validateAvatarFile(file)}`;
 }
 
@@ -38,12 +45,12 @@ export async function uploadAvatar(client: CloudAvatarClient, athleteId: string,
     contentType: file.type,
     upsert: true
   });
-  if (error) throw { code: "unavailable" };
+  if (error) throw failure("unavailable");
   return path;
 }
 
 export async function createAvatarSignedUrl(client: CloudAvatarClient, path: string): Promise<string> {
   const { data, error } = await client.storage.from(AVATAR_BUCKET).createSignedUrl(path, AVATAR_EXPIRY_SECONDS);
-  if (error || !data?.signedUrl) throw { code: "unavailable" };
+  if (error || !data?.signedUrl) throw failure("unavailable");
   return data.signedUrl;
 }

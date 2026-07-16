@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(22);
+select plan(23);
 
 select has_column(
   'public',
@@ -88,6 +88,12 @@ select is(
     where athlete_id = '00000000-0000-0000-0000-000000000701'),
   '00000000-0000-0000-0000-000000000701/avatar.png',
   'RPC persists the authenticated athlete avatar path'
+);
+
+select is(
+  (public.hydrate_athlete_state()->'profile'->>'avatarPath'),
+  '00000000-0000-0000-0000-000000000701/avatar.png',
+  'hydration exposes the authenticated athlete avatar path'
 );
 
 select is(

@@ -4,7 +4,7 @@ import { createCloudRepository, type CloudQueryClient } from "./cloud-repository
 
 type Call = {
   table: string;
-  operation: "insert" | "select" | "update" | "upsert";
+  operation: "insert" | "select" | "upsert";
   value?: unknown;
   options?: unknown;
   filters: Array<[string, unknown]>;
@@ -30,15 +30,6 @@ function createFakeClient() {
         upsert(value, options) {
           calls.push({ table, operation: "upsert", value, options, filters });
           return Promise.resolve({ data: null, error: null });
-        },
-        update(value) {
-          calls.push({ table, operation: "update", value, filters });
-          return {
-            eq(column: string, value: unknown) {
-              filters.push([column, value]);
-              return Promise.resolve({ data: null, error: null });
-            }
-          };
         },
         select() {
           calls.push({ table, operation: "select", filters });
@@ -79,12 +70,8 @@ describe("cloud repository", () => {
 
     await createCloudRepository(fake.client).saveAvatarPath("athlete-1/avatar.png");
 
-    expect(fake.calls).toEqual([{
-      table: "athlete_profiles",
-      operation: "update",
-      value: { avatar_path: "athlete-1/avatar.png" },
-      filters: [["id", "athlete-1"]]
-    }]);
+    expect(fake.rpc).toHaveBeenCalledWith("update_avatar_path", { p_avatar_path: "athlete-1/avatar.png" });
+    expect(fake.calls).toEqual([]);
   });
 
   it("uses caller-stable IDs when retrying facts, logs, and guided state", async () => {

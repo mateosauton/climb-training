@@ -28,6 +28,7 @@ function authenticatedClient(session: AuthSession): AuthClient {
 function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepository {
   return {
     ensureProfile,
+    saveAvatarPath: vi.fn(async () => undefined),
     hydrate: vi.fn(async () => ({ facts: [], sessionLogs: [], guided: { schemaVersion: 1, activeRun: null, history: [] }, activePlan: null })),
     submitQuestionnaire: vi.fn(async () => undefined),
     appendFacts: vi.fn(async () => undefined),

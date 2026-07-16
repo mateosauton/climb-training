@@ -25,19 +25,19 @@ export interface CloudQueryClient {
   auth: {
     getUser(): PromiseLike<CloudResult<{ user: { id: string } | null }>>;
   };
-  rpc(name: "ensure_athlete_profile" | "hydrate_athlete_state"): PromiseLike<CloudResult<unknown>>;
+  rpc(
+    name: "ensure_athlete_profile" | "hydrate_athlete_state" | "update_avatar_path",
+    values?: Record<string, JsonValue>
+  ): PromiseLike<CloudResult<unknown>>;
   functions?: {
     invoke(name: "generate-plan", options: { body: PlanGenerationInput }): PromiseLike<CloudResult<PlanGenerationJob>>;
   };
-  from(table: "questionnaire_submissions" | "session_runs" | "session_logs" | "athlete_facts" | "athlete_guided_states" | "athlete_profiles"): {
+  from(table: "questionnaire_submissions" | "session_runs" | "session_logs" | "athlete_facts" | "athlete_guided_states"): {
     insert(values: Record<string, JsonValue>): PromiseLike<CloudResult<unknown>>;
     upsert(
       values: Record<string, JsonValue>,
       options: { onConflict: "athlete_id,idempotency_key" | "id" | "athlete_id"; ignoreDuplicates: boolean }
     ): PromiseLike<CloudResult<unknown>>;
-    update(values: Record<string, JsonValue>): {
-      eq(column: string, value: JsonValue): PromiseLike<CloudResult<unknown>>;
-    };
   };
   from(table: "training_plans"): {
     select(columns: string): CloudSelectQuery;
@@ -47,7 +47,7 @@ export interface CloudQueryClient {
 export type CloudRepository = {
   ensureProfile(): Promise<void>;
   hydrate(): Promise<CloudHydration>;
-  saveAvatarPath?(path: string): Promise<void>;
+  saveAvatarPath(path: string): Promise<void>;
   submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
   appendFacts(facts: FactWrite[]): Promise<void>;
   saveGuidedState(state: JsonValue, idempotencyKey: string): Promise<void>;
@@ -97,8 +97,8 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       };
     },
     async saveAvatarPath(path) {
-      const id = await athleteId(client);
-      await requireSuccess(client.from("athlete_profiles").update({ avatar_path: path }).eq("id", id));
+      await athleteId(client);
+      await requireSuccess(client.rpc("update_avatar_path", { p_avatar_path: path }));
     },
     async submitQuestionnaire({ version, answers, idempotencyKey }) {
       const id = await athleteId(client);
