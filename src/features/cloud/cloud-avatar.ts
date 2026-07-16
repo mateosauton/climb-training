@@ -1,5 +1,8 @@
 const AVATAR_BUCKET = "profile-photos";
-const AVATAR_EXPIRY_SECONDS = 60;
+export const AVATAR_EXPIRY_SECONDS = 60;
+export const AVATAR_REFRESH_DELAY_MS = 50_000;
+export const AVATAR_RETRY_DELAY_MS = 1_000;
+const AVATAR_MAX_RETRY_DELAY_MS = 8_000;
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 
 const extensionsByMime = {
@@ -18,10 +21,15 @@ function failure(code: CloudAvatarError["code"]): CloudAvatarError {
   return { code };
 }
 
+export function avatarRetryDelayMs(attempt: number): number {
+  return Math.min(AVATAR_RETRY_DELAY_MS * (2 ** attempt), AVATAR_MAX_RETRY_DELAY_MS);
+}
+
 export interface CloudAvatarClient {
   storage: {
     from(bucket: typeof AVATAR_BUCKET): {
       upload(path: string, file: AvatarFile, options: { contentType: string; upsert: boolean }): PromiseLike<CloudResult>;
+      remove(paths: string[]): PromiseLike<CloudResult>;
       createSignedUrl(path: string, expiresIn: number): PromiseLike<CloudResult<{ signedUrl: string } | null>>;
     };
   };
@@ -53,4 +61,9 @@ export async function createAvatarSignedUrl(client: CloudAvatarClient, path: str
   const { data, error } = await client.storage.from(AVATAR_BUCKET).createSignedUrl(path, AVATAR_EXPIRY_SECONDS);
   if (error || !data?.signedUrl) throw failure("unavailable");
   return data.signedUrl;
+}
+
+export async function removeAvatar(client: CloudAvatarClient, path: string): Promise<void> {
+  const { error } = await client.storage.from(AVATAR_BUCKET).remove([path]);
+  if (error) throw failure("unavailable");
 }

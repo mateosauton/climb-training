@@ -4,9 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProfilePhotoPicker } from "./ProfilePhotoPicker";
+import type { AvatarFile } from "../cloud/cloud-avatar";
 
 function PickerHarness() {
-  const [file, setFile] = React.useState<File | null>(null);
+  const [file, setFile] = React.useState<AvatarFile | null>(null);
   return <ProfilePhotoPicker file={file} onFileChange={setFile} />;
 }
 

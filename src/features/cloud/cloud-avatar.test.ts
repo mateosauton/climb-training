@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { avatarPath, createAvatarSignedUrl, uploadAvatar, validateAvatarFile, type CloudAvatarError } from "./cloud-avatar";
+import { AVATAR_EXPIRY_SECONDS, avatarPath, avatarRetryDelayMs, createAvatarSignedUrl, removeAvatar, uploadAvatar, validateAvatarFile, type CloudAvatarError } from "./cloud-avatar";
 
 function fakeClient() {
   const upload = vi.fn().mockResolvedValue({ data: null, error: null });
+  const remove = vi.fn().mockResolvedValue({ data: null, error: null });
   const createSignedUrl = vi.fn().mockResolvedValue({ data: { signedUrl: "https://signed.example/avatar" }, error: null });
   return {
     client: {
-      storage: { from: vi.fn().mockReturnValue({ upload, createSignedUrl }) }
+      storage: { from: vi.fn().mockReturnValue({ upload, remove, createSignedUrl }) }
     },
     upload,
+    remove,
     createSignedUrl
   };
 }
@@ -40,6 +42,10 @@ describe("profile photo files", () => {
 });
 
 describe("cloud avatar storage", () => {
+  it("backs off transient signed URL retries with a stable cap", () => {
+    expect([0, 1, 2, 3, 4].map(avatarRetryDelayMs)).toEqual([1_000, 2_000, 4_000, 8_000, 8_000]);
+  });
+
   it("uploads to the private profile bucket with overwrite enabled", async () => {
     const fake = fakeClient();
     const file = new File(["photo"], "photo.png", { type: "image/png" });
@@ -56,7 +62,15 @@ describe("cloud avatar storage", () => {
     const fake = fakeClient();
 
     await expect(createAvatarSignedUrl(fake.client, "athlete-1/avatar.webp")).resolves.toBe("https://signed.example/avatar");
-    expect(fake.createSignedUrl).toHaveBeenCalledWith("athlete-1/avatar.webp", 60);
+    expect(AVATAR_EXPIRY_SECONDS).toBe(60);
+    expect(fake.createSignedUrl).toHaveBeenCalledWith("athlete-1/avatar.webp", AVATAR_EXPIRY_SECONDS);
+  });
+
+  it("removes an obsolete avatar object", async () => {
+    const fake = fakeClient();
+
+    await expect(removeAvatar(fake.client, "athlete-1/avatar.webp")).resolves.toBeUndefined();
+    expect(fake.remove).toHaveBeenCalledWith(["athlete-1/avatar.webp"]);
   });
 
   it("returns the same discriminated error shape for storage failures", async () => {

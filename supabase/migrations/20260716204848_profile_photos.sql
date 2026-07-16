@@ -1,5 +1,9 @@
 alter table public.athlete_profiles
-  add column avatar_path text;
+  add column avatar_path text,
+  add constraint athlete_profiles_avatar_path_check check (
+    avatar_path is null
+    or avatar_path ~ ('^' || athlete_id::text || '/avatar\.(jpg|png|webp)$')
+  );
 
 insert into storage.buckets (
   id,

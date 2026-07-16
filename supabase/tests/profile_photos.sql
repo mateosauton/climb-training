@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(23);
+select plan(27);
 
 select has_column(
   'public',
@@ -88,6 +88,38 @@ select is(
     where athlete_id = '00000000-0000-0000-0000-000000000701'),
   '00000000-0000-0000-0000-000000000701/avatar.png',
   'RPC persists the authenticated athlete avatar path'
+);
+
+select throws_ok(
+  $$select public.update_avatar_path('00000000-0000-0000-0000-000000000702/avatar.png')$$,
+  '23514',
+  null,
+  'RPC rejects another athlete avatar path'
+);
+
+select throws_ok(
+  $$select public.update_avatar_path('00000000-0000-0000-0000-000000000701/avatar.gif')$$,
+  '23514',
+  null,
+  'RPC rejects unsupported avatar extensions'
+);
+
+select throws_ok(
+  $$update public.athlete_profiles
+    set avatar_path = '00000000-0000-0000-0000-000000000702/avatar.webp'
+    where athlete_id = '00000000-0000-0000-0000-000000000701'$$,
+  '23514',
+  null,
+  'profile check rejects another athlete avatar path'
+);
+
+select throws_ok(
+  $$update public.athlete_profiles
+    set avatar_path = '00000000-0000-0000-0000-000000000701/profile.png'
+    where athlete_id = '00000000-0000-0000-0000-000000000701'$$,
+  '23514',
+  null,
+  'profile check rejects noncanonical filenames'
 );
 
 select is(

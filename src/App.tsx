@@ -77,7 +77,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ProfilePhotoPicker } from "@/features/profile/ProfilePhotoPicker";
-import { createAvatarSignedUrl, uploadAvatar } from "@/features/cloud/cloud-avatar";
+import { AVATAR_REFRESH_DELAY_MS, avatarRetryDelayMs, createAvatarSignedUrl, removeAvatar, uploadAvatar } from "@/features/cloud/cloud-avatar";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -1347,6 +1347,7 @@ export default function App({
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState(null);
+  const avatarPathRef = useRef(cloudHydration?.profile?.avatarPath || null);
   const [avatarError, setAvatarError] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
   const pendingQuestionnaire = useRef(null);
@@ -1405,12 +1406,33 @@ export default function App({
 
   useEffect(() => {
     const path = cloudHydration?.profile?.avatarPath;
-    if (!cloudAvatarClient || !path) return;
+    avatarPathRef.current = path || null;
+    if (!cloudAvatarClient || !path) {
+      setAvatarUrl(null);
+      return;
+    }
     let current = true;
-    void createAvatarSignedUrl(cloudAvatarClient, path).then((url) => {
-      if (current) setAvatarUrl(url);
-    }).catch(() => undefined);
-    return () => { current = false; };
+    let timer;
+    let retryAttempt = 0;
+    const refresh = async () => {
+      try {
+        const url = await createAvatarSignedUrl(cloudAvatarClient, path);
+        if (!current) return;
+        setAvatarUrl(url);
+        retryAttempt = 0;
+        timer = setTimeout(refresh, AVATAR_REFRESH_DELAY_MS);
+      } catch {
+        if (!current) return;
+        setAvatarUrl(null);
+        timer = setTimeout(refresh, avatarRetryDelayMs(retryAttempt));
+        retryAttempt += 1;
+      }
+    };
+    void refresh();
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
   }, [cloudAvatarClient, cloudHydration?.profile?.avatarPath]);
 
   useEffect(() => {
@@ -1665,9 +1687,14 @@ export default function App({
     setAvatarSaving(true);
     setAvatarError("");
     try {
+      const previousPath = avatarPathRef.current;
       const path = await uploadAvatar(cloudAvatarClient, authUser.id, avatarFile);
       await cloudRepository.saveAvatarPath(path);
-      setAvatarUrl(await createAvatarSignedUrl(cloudAvatarClient, path));
+      avatarPathRef.current = path;
+      if (previousPath && previousPath !== path) {
+        await removeAvatar(cloudAvatarClient, previousPath).catch(() => undefined);
+      }
+      setAvatarUrl(await createAvatarSignedUrl(cloudAvatarClient, path).catch(() => null));
       setAvatarFile(null);
       return true;
     } catch {
