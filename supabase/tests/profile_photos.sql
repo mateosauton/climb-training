@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(20);
+select plan(22);
 
 select has_column(
   'public',
@@ -29,13 +29,16 @@ select is(
   'profile photos bucket accepts only JPEG, PNG, and WebP'
 );
 
-select is(
-  (select count(*) from pg_policies
+select results_eq(
+  $$select cmd
+    from pg_policies
     where schemaname = 'storage'
       and tablename = 'objects'
-      and policyname like '%profile photos%'),
-  4::bigint,
-  'profile photos have one policy for each CRUD operation'
+      and policyname like '%profile photos%'
+      and roles @> array['authenticated'::name]
+    order by cmd$$,
+  $$values ('DELETE'::text), ('INSERT'::text), ('SELECT'::text), ('UPDATE'::text)$$,
+  'authenticated has one profile photo policy for each CRUD operation'
 );
 
 select has_function(
@@ -134,6 +137,28 @@ select lives_ok(
     where bucket_id = 'profile-photos'
       and name = '00000000-0000-0000-0000-000000000701/avatar.png'$$,
   'athlete updates their profile photo for Storage upsert support'
+);
+
+select is(
+  (with changed as (
+    update storage.objects
+    set metadata = '{"forbidden":true}'::jsonb
+    where bucket_id = 'profile-photos'
+      and name = '00000000-0000-0000-0000-000000000702/avatar.png'
+    returning 1
+  ) select count(*) from changed),
+  0::bigint,
+  'athlete cannot update another athlete profile photo'
+);
+
+select throws_ok(
+  $$update storage.objects
+    set name = '00000000-0000-0000-0000-000000000702/stolen.png'
+    where bucket_id = 'profile-photos'
+      and name = '00000000-0000-0000-0000-000000000701/avatar.png'$$,
+  '42501',
+  null,
+  'athlete cannot move their profile photo into another UUID folder'
 );
 
 select lives_ok(
