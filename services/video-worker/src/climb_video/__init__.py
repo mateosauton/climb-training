@@ -1,0 +1,2 @@
+"""Climbing video intelligence worker."""
+
