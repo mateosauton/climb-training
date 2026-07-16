@@ -11,6 +11,7 @@ class ProviderError(RuntimeError):
 
 class PerceptionProvider(ABC):
     @abstractmethod
-    async def analyze(self, sequences: list[EvidenceSequence]) -> AnalysisResult:
+    async def analyze(
+        self, sequences: list[EvidenceSequence], knowledge: dict[str, str]
+    ) -> AnalysisResult:
         """Analyze timestamped evidence and return a grounded structured result."""
-

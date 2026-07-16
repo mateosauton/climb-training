@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import ValidationError
 
-from climb_video.contracts import AnalysisResult, EvidenceSequence
+from climb_video.contracts import AnalysisResult, EvidenceSequence, ProviderProvenance
 from climb_video.providers.base import PerceptionProvider, ProviderError
 
 
@@ -42,7 +42,9 @@ class QwenVllmProvider(PerceptionProvider):
         self._client = client
         self.timeout_seconds = timeout_seconds
 
-    async def analyze(self, sequences: list[EvidenceSequence]) -> AnalysisResult:
+    async def analyze(
+        self, sequences: list[EvidenceSequence], knowledge: dict[str, str]
+    ) -> AnalysisResult:
         evidence_ids = {frame.id for sequence in sequences for frame in sequence.frames}
         content: list[dict[str, object]] = [
             {
@@ -53,6 +55,16 @@ class QwenVllmProvider(PerceptionProvider):
                 ),
             }
         ]
+        if knowledge:
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        "Reviewed climbing knowledge (cite only these IDs): "
+                        + json.dumps(knowledge, sort_keys=True)
+                    ),
+                }
+            )
         for sequence in sequences:
             for frame in sequence.frames:
                 content.append(
@@ -98,7 +110,13 @@ class QwenVllmProvider(PerceptionProvider):
             unknown = referenced - evidence_ids
             if unknown:
                 raise ProviderError(f"unknown evidence reference: {sorted(unknown)}")
-            return result
+            return result.model_copy(
+                update={
+                    "provenance": ProviderProvenance(
+                        provider="qwen-vllm", model=self.model, prompt_version="v1"
+                    )
+                }
+            )
         except ProviderError:
             raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as error:
@@ -106,4 +124,3 @@ class QwenVllmProvider(PerceptionProvider):
         finally:
             if owns_client:
                 await client.aclose()
-

@@ -83,7 +83,7 @@ async def test_qwen_sends_labeled_timestamps_and_parses_strict_json(tmp_path) ->
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     provider = QwenVllmProvider(base_url="http://vllm:8000", model="qwen", client=client)
-    result = await provider.analyze(sequences)
+    result = await provider.analyze(sequences, {"knowledge:one": "Reviewed cue"})
     content = request_body["messages"][0]["content"]
     labels = [part["text"] for part in content if part["type"] == "text"]
     assert any("frame-1" in label and "1000ms" in label for label in labels)
@@ -109,7 +109,7 @@ async def test_qwen_rejects_malformed_refused_and_timed_out_results(response) ->
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     provider = QwenVllmProvider(base_url="http://vllm:8000", model="qwen", client=client)
     with pytest.raises(ProviderError):
-        await provider.analyze(evidence())
+        await provider.analyze(evidence(), {})
     await client.aclose()
 
 
@@ -125,7 +125,7 @@ async def test_qwen_rejects_unknown_evidence_reference() -> None:
     )
     provider = QwenVllmProvider(base_url="http://vllm:8000", model="qwen", client=client)
     with pytest.raises(ProviderError, match="unknown evidence"):
-        await provider.analyze(evidence())
+        await provider.analyze(evidence(), {})
     await client.aclose()
 
 
@@ -161,3 +161,22 @@ def test_coaching_requires_reviewed_citations_and_applies_pain_override() -> Non
 def test_openai_adapter_is_disabled_by_default() -> None:
     with pytest.raises(ValueError, match="disabled"):
         OpenAIProvider(api_key="secret", model="gpt-4.1")
+
+
+@pytest.mark.asyncio
+async def test_enabled_openai_adapter_uses_same_result_schema() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": json.dumps(response_payload())}}]},
+            )
+        )
+    )
+    provider = OpenAIProvider(
+        api_key="secret", model="gpt-4.1", enabled=True, client=client
+    )
+    result = await provider.analyze(evidence(), {"knowledge:one": "Reviewed cue"})
+    assert result.observations[0].id == "obs-1"
+    assert result.provenance.provider == "openai"
+    await client.aclose()
