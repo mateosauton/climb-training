@@ -1,0 +1,16 @@
+{
+  "name": "climb-video-worker-1",
+  "droplet_id": 585126583,
+  "region": "tor1",
+  "size": "gpu-l40sx1-48gb",
+  "image": "gpu-h100x1-base",
+  "firewall_id": "abc7cf72-5992-48b7-ac7e-f8baa6e165e1",
+  "git_revision": "1e9280e",
+  "deployed_at": "2026-07-16T19:20:59Z",
+  "observed_price_usd_per_hour": 1.57,
+  "model": "Qwen/Qwen3-VL-8B-Instruct",
+  "model_runtime": "vllm/vllm-openai:v0.14.1",
+  "model_state": "healthy",
+  "worker_image_state": "built",
+  "worker_queue_state": "awaiting_supabase_service_role_key"
+}

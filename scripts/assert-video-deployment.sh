@@ -42,6 +42,7 @@ if "networks: [model, egress]" not in block:
 PY
 
 grep -Fq '/etc/climb-video-worker/worker.env' "$compose" || fail 'root-owned environment file is not configured'
+grep -Fq 'docker-compose-v2' "$cloud_init" || fail 'Docker Compose is not installed during host bootstrap'
 grep -Fq 'restart: unless-stopped' "$compose" || fail 'services do not have a restart policy'
 grep -Fq 'networks: [model, egress]' "$compose" || fail 'worker has no outbound network for Supabase'
 grep -Fq '  egress:' "$compose" || fail 'outbound Compose network is not declared'
