@@ -34,7 +34,9 @@ class ClaimedJob:
 class VideoRepository(Protocol):
     def claim(self, worker_id: str, visibility_seconds: int) -> ClaimedJob | None: ...
     def download_asset(self, claim: ClaimedJob, destination: Path) -> None: ...
-    def checkpoint(self, job_id: UUID, stage: str, progress: int, payload: dict[str, Any]) -> None: ...
+    def checkpoint(
+        self, job_id: UUID, stage: str, progress: int, payload: dict[str, Any]
+    ) -> None: ...
     def finalize(self, job_id: UUID, envelope: dict[str, Any]) -> str: ...
     def get_reviewed_knowledge(self) -> dict[str, str]: ...
 
@@ -90,16 +92,15 @@ class VideoPipeline:
             except ValidationError as error:
                 raise ValueError("invalid persisted checkpoint") from error
         else:
-            await asyncio.to_thread(
-                self.repository.checkpoint, claim.job_id, "extracting", 10, {}
-            )
+            await asyncio.to_thread(self.repository.checkpoint, claim.job_id, "extracting", 10, {})
             with tempfile.TemporaryDirectory(prefix=f"climb-{claim.job_id}-") as directory:
                 root = Path(directory)
                 video = root / "source.mp4"
                 await asyncio.to_thread(self.repository.download_asset, claim, video)
-                await asyncio.to_thread(probe_video, video, max_bytes=self.max_bytes)
+                metadata = await asyncio.to_thread(probe_video, video, max_bytes=self.max_bytes)
+                sample_count = min(3600, max(1, metadata.duration_ms // 1000 + 1))
                 frames = await asyncio.to_thread(
-                    extract_frames, video, root / "frames", fps=1, max_frames=60
+                    extract_frames, video, root / "frames", fps=1, max_frames=sample_count
                 )
                 sequences = select_evidence(frames)
                 result = await self.provider.analyze(sequences, knowledge)
@@ -116,9 +117,7 @@ class VideoPipeline:
                 checkpoint_payload,
             )
 
-        evidence_ids = {
-            frame.id for sequence in sequences for frame in sequence.frames
-        }
+        evidence_ids = {frame.id for sequence in sequences for frame in sequence.frames}
         result = synthesize_coaching(
             result.model_dump(mode="json"),
             evidence_ids=evidence_ids,

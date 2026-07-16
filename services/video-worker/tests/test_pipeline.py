@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -55,9 +56,7 @@ class FakeProvider:
         return AnalysisResult(
             observations=[],
             recommendations=[],
-            provenance=ProviderProvenance(
-                provider="qwen-vllm", model="qwen", prompt_version="v1"
-            ),
+            provenance=ProviderProvenance(provider="qwen-vllm", model="qwen", prompt_version="v1"),
         )
 
 
@@ -78,8 +77,15 @@ async def test_pipeline_claims_downloads_checkpoints_and_finalizes(monkeypatch) 
     claimed = claim()
     repository = FakeRepository(claimed)
     provider = FakeProvider()
-    monkeypatch.setattr("climb_video.pipeline.probe_video", lambda path, max_bytes: object())
-    monkeypatch.setattr("climb_video.pipeline.extract_frames", lambda *args, **kwargs: [])
+    extracted: dict = {}
+    monkeypatch.setattr(
+        "climb_video.pipeline.probe_video",
+        lambda path, max_bytes: SimpleNamespace(duration_ms=120_000),
+    )
+    monkeypatch.setattr(
+        "climb_video.pipeline.extract_frames",
+        lambda *args, **kwargs: extracted.update(kwargs) or [],
+    )
     monkeypatch.setattr(
         "climb_video.pipeline.select_evidence",
         lambda frames: [
@@ -110,6 +116,7 @@ async def test_pipeline_claims_downloads_checkpoints_and_finalizes(monkeypatch) 
     assert repository.finalized[0]["evidence_sequences"][0]["frames"][0]["path"] is None
     assert provider.calls == 1
     assert provider.knowledge == repository.knowledge
+    assert extracted["max_frames"] == 121
 
 
 @pytest.mark.asyncio
@@ -119,7 +126,10 @@ async def test_pipeline_reuses_persisted_provider_result_on_redelivery() -> None
         recommendations=[],
         provenance=ProviderProvenance(provider="qwen-vllm", model="qwen", prompt_version="v1"),
     )
-    claimed = claim(checkpoint={"provider_result": result.model_dump(mode="json"), "evidence_sequences": []}, attempt=2)
+    claimed = claim(
+        checkpoint={"provider_result": result.model_dump(mode="json"), "evidence_sequences": []},
+        attempt=2,
+    )
     repository = FakeRepository(claimed)
     provider = FakeProvider()
     pipeline = VideoPipeline(repository=repository, provider=provider, worker_id="worker-1")
@@ -134,8 +144,12 @@ async def test_pipeline_reuses_persisted_provider_result_on_redelivery() -> None
 async def test_pipeline_records_safe_failure_and_retry_exhaustion() -> None:
     repository = FakeRepository(claim(attempt=3))
     provider = FakeProvider()
-    pipeline = VideoPipeline(repository=repository, provider=provider, worker_id="worker-1", max_attempts=3)
-    repository.download_asset = lambda claim, destination: (_ for _ in ()).throw(RuntimeError("secret=abc"))  # type: ignore[method-assign]
+    pipeline = VideoPipeline(
+        repository=repository, provider=provider, worker_id="worker-1", max_attempts=3
+    )
+    repository.download_asset = lambda claim, destination: (_ for _ in ()).throw(
+        RuntimeError("secret=abc")
+    )  # type: ignore[method-assign]
 
     assert await pipeline.run_once() is True
     stage, _, payload = repository.checkpoints[-1]

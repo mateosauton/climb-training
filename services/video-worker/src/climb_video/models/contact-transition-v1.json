@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "model_id": "contact-transition-prior",
+  "version": "1.0.0",
+  "trained_at": "2026-07-16T19:41:37.926913+00:00",
+  "dataset": {
+    "id": "the-way-up-zenodo-15196867",
+    "doi": "10.5281/zenodo.15196867",
+    "license": "CC-BY-4.0",
+    "checksum": "md5:a46cbca826a7f28ab591a4900ce5a1c9"
+  },
+  "features": [
+    "log1p_blur",
+    "exposure",
+    "log1p_motion"
+  ],
+  "preprocessing": {
+    "means": [
+      6.129635540743371,
+      0.9262716538879948,
+      1.6371404589943857
+    ],
+    "scales": [
+      0.1001650308298629,
+      0.03978888537253171,
+      0.24431590535820447
+    ]
+  },
+  "model": {
+    "type": "logistic_regression",
+    "coefficients": [
+      -0.6242615157163449,
+      0.04703660997349144,
+      0.13125777496097185
+    ],
+    "intercept": 0.1369220529660739,
+    "threshold": 0.1
+  },
+  "training": {
+    "seed": 42,
+    "fps": 1,
+    "transition_tolerance_seconds": 0.75,
+    "split": "participant-disjoint-70-15-15",
+    "participant_counts": {
+      "train": 7,
+      "validation": 1,
+      "test": 2
+    },
+    "sample_counts": {
+      "train": 1165,
+      "validation": 170,
+      "test": 224
+    }
+  },
+  "metrics": {
+    "validation": {
+      "roc_auc": 0.5562,
+      "average_precision": 0.9106,
+      "f1": 0.9304
+    },
+    "test": {
+      "roc_auc": 0.6466,
+      "average_precision": 0.9633,
+      "f1": 0.9652
+    }
+  }
+}
