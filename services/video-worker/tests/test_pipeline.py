@@ -3,7 +3,12 @@ from uuid import uuid4
 
 import pytest
 
-from climb_video.contracts import AnalysisResult, ProviderProvenance
+from climb_video.contracts import (
+    AnalysisResult,
+    EvidenceFrame,
+    EvidenceSequence,
+    ProviderProvenance,
+)
 from climb_video.pipeline import ClaimedJob, VideoPipeline
 from climb_video.repository import SupabaseVideoRepository
 
@@ -75,7 +80,25 @@ async def test_pipeline_claims_downloads_checkpoints_and_finalizes(monkeypatch) 
     provider = FakeProvider()
     monkeypatch.setattr("climb_video.pipeline.probe_video", lambda path, max_bytes: object())
     monkeypatch.setattr("climb_video.pipeline.extract_frames", lambda *args, **kwargs: [])
-    monkeypatch.setattr("climb_video.pipeline.select_evidence", lambda frames: [])
+    monkeypatch.setattr(
+        "climb_video.pipeline.select_evidence",
+        lambda frames: [
+            EvidenceSequence(
+                id="sequence-1",
+                frames=[
+                    EvidenceFrame(
+                        id=f"frame-{index}",
+                        sequence_id="sequence-1",
+                        frame_index=index,
+                        timestamp_ms=index * 1000,
+                        sha256=f"{index:064x}",
+                        path=f"/private/tmp/frame-{index}.jpg",
+                    )
+                    for index in range(3)
+                ],
+            )
+        ],
+    )
     pipeline = VideoPipeline(repository=repository, provider=provider, worker_id="worker-1")
 
     processed = await pipeline.run_once()
@@ -84,6 +107,7 @@ async def test_pipeline_claims_downloads_checkpoints_and_finalizes(monkeypatch) 
     assert repository.downloads == 1
     assert [stage for stage, _, _ in repository.checkpoints] == ["extracting", "perceiving"]
     assert repository.finalized[0]["job_id"] == str(claimed.job_id)
+    assert repository.finalized[0]["evidence_sequences"][0]["frames"][0]["path"] is None
     assert provider.calls == 1
     assert provider.knowledge == repository.knowledge
 

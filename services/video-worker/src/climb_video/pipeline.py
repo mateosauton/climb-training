@@ -103,6 +103,7 @@ class VideoPipeline:
                 )
                 sequences = select_evidence(frames)
                 result = await self.provider.analyze(sequences, knowledge)
+                sequences = _without_local_paths(sequences)
             checkpoint_payload = {
                 "provider_result": result.model_dump(mode="json"),
                 "evidence_sequences": [sequence.model_dump(mode="json") for sequence in sequences],
@@ -138,3 +139,14 @@ class VideoPipeline:
             processed = await self.run_once()
             if not processed:
                 await asyncio.sleep(poll_seconds)
+
+
+def _without_local_paths(sequences: list[EvidenceSequence]) -> list[EvidenceSequence]:
+    return [
+        sequence.model_copy(
+            update={
+                "frames": [frame.model_copy(update={"path": None}) for frame in sequence.frames]
+            }
+        )
+        for sequence in sequences
+    ]
