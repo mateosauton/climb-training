@@ -211,14 +211,16 @@ describe("cloud-primary app integration", () => {
   });
 
   it("deletes a previous cross-extension avatar only after the replacement is persisted", async () => {
+    vi.useFakeTimers();
     const calls: string[] = [];
     const saveAvatarPath = vi.fn(async () => { calls.push("save"); });
     const remove = vi.fn(async () => { calls.push("remove"); return { data: null, error: new Error("cleanup failed") }; });
     const cloud = { ...repository(vi.fn(async () => undefined)), saveAvatarPath };
+    const createSignedUrl = vi.fn(async (path: string) => ({ data: { signedUrl: `https://signed.test/${path}` }, error: null }));
     const cloudAvatarClient = { storage: { from: () => ({
       upload: async () => { calls.push("upload"); return { data: {}, error: null }; },
       remove,
-      createSignedUrl: async () => ({ data: { signedUrl: "https://signed.test/new" }, error: null })
+      createSignedUrl
     }) } };
     const hydration = {
       facts: [], sessionLogs: [], guided: { schemaVersion: 1 as const, activeRun: null, history: [] }, activePlan: null,
@@ -226,13 +228,18 @@ describe("cloud-primary app integration", () => {
     };
     render(<App cloudRepository={cloud} cloudAvatarClient={cloudAvatarClient} cloudHydration={hydration} />);
 
-    await userEvent.upload(screen.getByLabelText("Foto de perfil"), new File(["avatar"], "avatar.png", { type: "image/png" }));
-    await userEvent.setup().click(screen.getByRole("button", { name: /^6\./ }));
-    await userEvent.setup().click(screen.getByRole("button", { name: "Guardar cuestionario" }));
+    fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    await waitFor(() => expect(remove).toHaveBeenCalledWith(["test-user/avatar.webp"]));
+    expect(remove).toHaveBeenCalledWith(["test-user/avatar.webp"]);
     expect(calls).toEqual(["upload", "save", "remove"]);
     expect(screen.queryByText("No pudimos guardar tu foto de perfil. Intentá nuevamente.")).not.toBeInTheDocument();
+    createSignedUrl.mockClear();
+    await act(async () => vi.advanceTimersByTimeAsync(50_000));
+    expect(createSignedUrl).toHaveBeenCalledTimes(1);
+    expect(createSignedUrl).toHaveBeenCalledWith("test-user/avatar.png", 60);
   });
 
   it("hydrates facts and activity from cloud state instead of local recovery on reload", async () => {

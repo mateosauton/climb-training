@@ -1347,7 +1347,8 @@ export default function App({
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState(null);
-  const avatarPathRef = useRef(cloudHydration?.profile?.avatarPath || null);
+  const [avatarPath, setAvatarPath] = useState(cloudHydration?.profile?.avatarPath || null);
+  const avatarPathRef = useRef(avatarPath);
   const [avatarError, setAvatarError] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
   const pendingQuestionnaire = useRef(null);
@@ -1405,8 +1406,12 @@ export default function App({
   }, [theme]);
 
   useEffect(() => {
-    const path = cloudHydration?.profile?.avatarPath;
-    avatarPathRef.current = path || null;
+    setAvatarPath(cloudHydration?.profile?.avatarPath || null);
+  }, [cloudHydration?.profile?.avatarPath]);
+
+  useEffect(() => {
+    const path = avatarPath;
+    avatarPathRef.current = path;
     if (!cloudAvatarClient || !path) {
       setAvatarUrl(null);
       return;
@@ -1433,7 +1438,7 @@ export default function App({
       current = false;
       clearTimeout(timer);
     };
-  }, [cloudAvatarClient, cloudHydration?.profile?.avatarPath]);
+  }, [cloudAvatarClient, avatarPath]);
 
   useEffect(() => {
     return () => {
@@ -1691,10 +1696,10 @@ export default function App({
       const path = await uploadAvatar(cloudAvatarClient, authUser.id, avatarFile);
       await cloudRepository.saveAvatarPath(path);
       avatarPathRef.current = path;
+      setAvatarPath(path);
       if (previousPath && previousPath !== path) {
         await removeAvatar(cloudAvatarClient, previousPath).catch(() => undefined);
       }
-      setAvatarUrl(await createAvatarSignedUrl(cloudAvatarClient, path).catch(() => null));
       setAvatarFile(null);
       return true;
     } catch {
