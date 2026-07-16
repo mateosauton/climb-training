@@ -7,3 +7,4 @@ dist
 output
 playwright-report
 test-results
+data/video-training/downloads/
