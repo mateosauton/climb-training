@@ -1,0 +1,11 @@
+.git
+.env*
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/__pycache__
+data/video-training/downloads
+dist
+node_modules
+playwright-report
+test-results

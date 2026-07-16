@@ -1,0 +1,38 @@
+#cloud-config
+package_update: true
+packages:
+  - fail2ban
+  - jq
+  - rsync
+  - ufw
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-climb-video-worker.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin prohibit-password
+      X11Forwarding no
+  - path: /etc/systemd/system/docker.service.d/10-climb-video-worker.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Service]
+      Restart=always
+      RestartSec=5
+
+runcmd:
+  - [install, -d, -m, "0700", -o, root, -g, root, /etc/climb-video-worker]
+  - [install, -d, -m, "0755", -o, root, -g, root, /opt/climb-video-worker]
+  - [install, -m, "0600", -o, root, -g, root, /dev/null, /etc/climb-video-worker/worker.env]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, docker]
+  - [systemctl, restart, ssh]
+  - [ufw, default, deny, incoming]
+  - [ufw, default, allow, outgoing]
+  - [ufw, allow, OpenSSH]
+  - [ufw, --force, enable]
+  - [systemctl, enable, --now, fail2ban]
+
+final_message: "Climb video worker host bootstrap complete"
