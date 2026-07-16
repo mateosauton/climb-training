@@ -1678,6 +1678,11 @@ export default function App({
     }
   }
 
+  function handleAvatarFileChange(file) {
+    setAvatarError("");
+    setAvatarFile(file);
+  }
+
   async function saveGuidedToCloud(state) {
     if (!cloudRepository) return;
     const pending = pendingGuided.current || { state, idempotencyKey: makeId() };
@@ -2984,7 +2989,7 @@ export default function App({
                 <form key={state.profile.questionnaireCompletedAt || "profile-form"} className="space-y-5" onSubmit={saveProfile}>
                   <section className="space-y-3">
                     <h3 className="font-semibold">Foto de perfil</h3>
-                    <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={setAvatarFile} disabled={avatarSaving} />
+                    <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={handleAvatarFileChange} disabled={avatarSaving} />
                     {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
                     {avatarFile ? <Button type="button" variant="outline" disabled={avatarSaving} onClick={() => void saveAvatar()}>{avatarSaving ? "Guardando foto…" : "Guardar foto"}</Button> : null}
                   </section>
@@ -3217,7 +3222,7 @@ export default function App({
             onSubmit={saveQuestionnaire}
             onSkip={skipQuestionnaire}
             avatarFile={avatarFile}
-            onAvatarFileChange={setAvatarFile}
+            onAvatarFileChange={handleAvatarFileChange}
             avatarUrl={avatarUrl}
             avatarError={avatarError}
             avatarSaving={avatarSaving}

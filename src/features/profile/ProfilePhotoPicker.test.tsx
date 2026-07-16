@@ -31,10 +31,37 @@ describe("ProfilePhotoPicker", () => {
     expect(screen.getByRole("img", { name: "Vista previa de la foto de perfil" })).toHaveClass("rounded-full");
   });
 
-  it("replaces the preview and releases obsolete object URLs", () => {
-    const { rerender, unmount } = render(<ProfilePhotoPicker file={new File(["one"], "one.png", { type: "image/png" })} onFileChange={() => undefined} />);
-    rerender(<ProfilePhotoPicker file={new File(["two"], "two.png", { type: "image/png" })} onFileChange={() => undefined} />);
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:avatar-preview");
+  it("opens the native picker from the visible button with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<ProfilePhotoPicker file={null} onFileChange={() => undefined} />);
+    const input = screen.getByLabelText("Foto de perfil");
+    const click = vi.spyOn(input, "click");
+
+    screen.getByRole("button", { name: "Elegir foto" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows selecting the same file twice", async () => {
+    const onFileChange = vi.fn();
+    const file = new File(["photo"], "avatar.png", { type: "image/png" });
+    render(<ProfilePhotoPicker file={null} onFileChange={onFileChange} />);
+    const input = screen.getByLabelText("Foto de perfil");
+
+    await userEvent.upload(input, file);
+    await userEvent.upload(input, file);
+
+    expect(onFileChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces the preview and releases obsolete object URLs", async () => {
+    vi.mocked(URL.createObjectURL).mockReturnValueOnce("blob:first").mockReturnValueOnce("blob:second");
+    const { unmount } = render(<PickerHarness />);
+    const input = screen.getByLabelText("Foto de perfil");
+    await userEvent.upload(input, new File(["one"], "one.png", { type: "image/png" }));
+    await userEvent.upload(input, new File(["two"], "two.png", { type: "image/png" }));
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:first");
     unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
   });

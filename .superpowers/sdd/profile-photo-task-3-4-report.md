@@ -80,3 +80,24 @@ Additional check: `git diff --check` passed.
 
 - The production build reports the repository's existing bundle-size advisory (`~891 kB` main JS before gzip); this task does not materially address code splitting.
 - E2E source was updated for the new navigation, but browser E2E was not run; the complete Vitest suite and production build passed.
+
+## Reviewer follow-up: picker operability
+
+Addressed all important review findings:
+
+- Replaced the label-based visible control with a native `button` that activates the hidden input through a ref.
+- Reset the file input value after every valid selection so the same file/name can be selected again.
+- Clear the previous avatar upload error whenever a new valid file is selected from onboarding or Profile.
+- Reworked replacement/cleanup coverage to use actual file uploads and added keyboard and same-file reselection coverage.
+
+RED command:
+
+`npm test -- --run src/features/profile/ProfilePhotoPicker.test.tsx src/features/cloud/cloud-integration.test.tsx`
+
+RED result: 3 expected failures: no visible button role, same-file callback fired once instead of twice, and stale upload error remained visible.
+
+GREEN command:
+
+`npm test -- --run src/features/profile/ProfilePhotoPicker.test.tsx src/features/cloud/cloud-integration.test.tsx`
+
+GREEN result: 2 files passed, 16 tests passed.

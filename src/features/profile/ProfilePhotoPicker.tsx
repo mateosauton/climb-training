@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { validateAvatarFile, type AvatarFile } from "@/features/cloud/cloud-avatar";
@@ -12,6 +12,7 @@ type ProfilePhotoPickerProps = {
 
 export function ProfilePhotoPicker({ file, onFileChange, currentUrl = null, disabled = false }: ProfilePhotoPickerProps) {
   const inputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(currentUrl);
   const [error, setError] = useState("");
 
@@ -32,6 +33,7 @@ export function ProfilePhotoPicker({ file, onFileChange, currentUrl = null, disa
       validateAvatarFile(nextFile);
       setError("");
       onFileChange(nextFile);
+      event.currentTarget.value = "";
     } catch (failure) {
       setError((failure as { code?: string }).code === "avatar_too_large"
         ? "La foto debe pesar como máximo 5 MiB."
@@ -48,12 +50,13 @@ export function ProfilePhotoPicker({ file, onFileChange, currentUrl = null, disa
         ) : (
           <div aria-hidden="true" className="size-20 rounded-full border bg-muted" />
         )}
-        <Button type="button" variant="outline" disabled={disabled} asChild>
-          <label htmlFor={inputId}>{previewUrl ? "Reemplazar foto" : "Elegir foto"}</label>
+        <Button type="button" variant="outline" disabled={disabled} onClick={() => inputRef.current?.click()}>
+          {previewUrl ? "Reemplazar foto" : "Elegir foto"}
         </Button>
       </div>
       <input
         id={inputId}
+        ref={inputRef}
         type="file"
         className="sr-only"
         aria-label="Foto de perfil"

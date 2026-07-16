@@ -177,6 +177,9 @@ describe("cloud-primary app integration", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Guardar cuestionario" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos guardar tu foto");
     expect(screen.getAllByRole("dialog").at(-1)).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: /^1\./ }));
+    await userEvent.upload(screen.getByLabelText("Foto de perfil"), new File(["new"], "replacement.png", { type: "image/png" }));
+    expect(screen.queryByText("No pudimos guardar tu foto de perfil. Intentá nuevamente.")).not.toBeInTheDocument();
   });
 
   it("hydrates facts and activity from cloud state instead of local recovery on reload", async () => {
