@@ -139,6 +139,7 @@ create table public.video_observations (
   start_ms integer check (start_ms is null or start_ms >= 0),
   end_ms integer check (end_ms is null or end_ms >= coalesce(start_ms, 0)),
   evidence_ids uuid[] not null default '{}',
+  evidence_refs text[] not null default '{}',
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   foreign key (video_asset_id, athlete_id)
@@ -156,6 +157,7 @@ create table public.video_recommendations (
   body text not null check (char_length(body) > 0),
   drill jsonb,
   evidence_ids uuid[] not null default '{}',
+  evidence_refs text[] not null default '{}',
   status text not null default 'active'
     check (status in ('active', 'completed', 'dismissed', 'superseded')),
   created_at timestamptz not null default now(),
@@ -538,36 +540,59 @@ begin
   for v_item in select value from jsonb_array_elements(coalesce(v_payload->'observations', '[]'::jsonb)) loop
     insert into public.video_observations (
       athlete_id, analysis_id, video_asset_id, category, summary, confidence,
-      start_ms, end_ms, evidence_ids, payload
+      start_ms, end_ms, evidence_ids, evidence_refs, payload
     ) values (
       v_job.athlete_id, v_analysis_id, v_job.video_asset_id,
       coalesce(v_item->>'category', v_item->>'label', 'technique'),
       coalesce(v_item->>'summary', v_item->>'detail'),
       (v_item->>'confidence')::real, (v_item->>'start_ms')::integer,
       (v_item->>'end_ms')::integer, '{}',
+      case when jsonb_typeof(v_item->'evidence_refs') = 'array'
+        then array(select jsonb_array_elements_text(v_item->'evidence_refs'))
+        else '{}' end,
       coalesce(v_item->'payload', v_item)
     );
   end loop;
 
   for v_item in select value from jsonb_array_elements(coalesce(v_payload->'recommendations', '[]'::jsonb)) loop
     insert into public.video_recommendations (
-      athlete_id, analysis_id, video_asset_id, priority, title, body, drill, evidence_ids
+      athlete_id, analysis_id, video_asset_id, priority, title, body, drill,
+      evidence_ids, evidence_refs
     ) values (
       v_job.athlete_id, v_analysis_id, v_job.video_asset_id,
       coalesce((v_item->>'priority')::integer, 1), v_item->>'title',
       coalesce(v_item->>'body', v_item->>'guidance'),
       coalesce(v_item->'drill', jsonb_build_object('citations', coalesce(v_item->'citations', '[]'::jsonb), 'evidence_refs', coalesce(v_item->'evidence_refs', '[]'::jsonb))),
-      '{}'
+      '{}', case when jsonb_typeof(v_item->'evidence_refs') = 'array'
+        then array(select jsonb_array_elements_text(v_item->'evidence_refs'))
+        else '{}' end
     );
   end loop;
 
-  if v_payload ? 'themes' then
-    insert into public.video_theme_snapshots (athlete_id, analysis_id, themes, coaching_summary)
-    values (
-      v_job.athlete_id, v_analysis_id, v_payload->'themes',
-      coalesce(v_payload->>'coaching_summary', '')
-    );
-  end if;
+  insert into public.video_theme_snapshots (athlete_id, analysis_id, themes, coaching_summary)
+  values (
+    v_job.athlete_id,
+    v_analysis_id,
+    coalesce(
+      v_payload->'themes',
+      (
+        select coalesce(jsonb_agg(jsonb_build_object(
+          'label', coalesce(observation->>'label', observation->>'category'),
+          'confidence', observation->'confidence'
+        )), '[]'::jsonb)
+        from jsonb_array_elements(coalesce(v_payload->'observations', '[]'::jsonb)) observation
+      )
+    ),
+    coalesce(
+      v_payload->>'coaching_summary',
+      (
+        select coalesce(recommendation->>'guidance', recommendation->>'body')
+        from jsonb_array_elements(coalesce(v_payload->'recommendations', '[]'::jsonb)) recommendation
+        limit 1
+      ),
+      'Analysis completed; compare the next video to track recurring movement themes.'
+    )
+  );
 
   update private.video_analysis_jobs
   set state = 'completed', stage = 'completed', progress = 100,

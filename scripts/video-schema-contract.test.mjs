@@ -15,3 +15,12 @@ test("the final failed worker attempt becomes terminal and archives its queue me
   assert.match(migration, /perform pgmq\.archive\('video_analysis', v_job\.queue_message_id\)/);
   assert.match(migration, /set processing_status = 'failed'/);
 });
+
+test("coach history preserves evidence references and always projects a theme snapshot", async () => {
+  const migration = await readFile(migrationUrl, "utf8");
+
+  assert.match(migration, /evidence_refs text\[\] not null default '\{\}'/);
+  assert.match(migration, /jsonb_array_elements_text\(v_item->'evidence_refs'\)/);
+  assert.match(migration, /insert into public\.video_theme_snapshots/);
+  assert.doesNotMatch(migration, /if v_payload \? 'themes' then/);
+});
