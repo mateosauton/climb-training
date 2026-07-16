@@ -29,12 +29,15 @@ export interface CloudQueryClient {
   functions?: {
     invoke(name: "generate-plan", options: { body: PlanGenerationInput }): PromiseLike<CloudResult<PlanGenerationJob>>;
   };
-  from(table: "questionnaire_submissions" | "session_runs" | "session_logs" | "athlete_facts" | "athlete_guided_states"): {
+  from(table: "questionnaire_submissions" | "session_runs" | "session_logs" | "athlete_facts" | "athlete_guided_states" | "athlete_profiles"): {
     insert(values: Record<string, JsonValue>): PromiseLike<CloudResult<unknown>>;
     upsert(
       values: Record<string, JsonValue>,
       options: { onConflict: "athlete_id,idempotency_key" | "id" | "athlete_id"; ignoreDuplicates: boolean }
     ): PromiseLike<CloudResult<unknown>>;
+    update(values: Record<string, JsonValue>): {
+      eq(column: string, value: JsonValue): PromiseLike<CloudResult<unknown>>;
+    };
   };
   from(table: "training_plans"): {
     select(columns: string): CloudSelectQuery;
@@ -44,6 +47,7 @@ export interface CloudQueryClient {
 export type CloudRepository = {
   ensureProfile(): Promise<void>;
   hydrate(): Promise<CloudHydration>;
+  saveAvatarPath?(path: string): Promise<void>;
   submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
   appendFacts(facts: FactWrite[]): Promise<void>;
   saveGuidedState(state: JsonValue, idempotencyKey: string): Promise<void>;
@@ -79,12 +83,22 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       const { data, error } = await client.rpc("hydrate_athlete_state");
       if (error || !data || typeof data !== "object") throw failure("unavailable");
       const snapshot = data as CloudHydration;
+      const rawProfile = snapshot.profile as (typeof snapshot.profile & { avatar_path?: unknown }) | undefined;
       return {
         facts: Array.isArray(snapshot.facts) ? snapshot.facts : [],
         sessionLogs: Array.isArray(snapshot.sessionLogs) ? snapshot.sessionLogs : [],
         guided: snapshot.guided ?? { schemaVersion: 1, activeRun: null, history: [] },
-        activePlan: snapshot.activePlan ?? null
+        activePlan: snapshot.activePlan ?? null,
+        profile: {
+          avatarPath: typeof rawProfile?.avatar_path === "string"
+            ? rawProfile.avatar_path
+            : snapshot.profile?.avatarPath ?? null
+        }
       };
+    },
+    async saveAvatarPath(path) {
+      const id = await athleteId(client);
+      await requireSuccess(client.from("athlete_profiles").update({ avatar_path: path }).eq("id", id));
     },
     async submitQuestionnaire({ version, answers, idempotencyKey }) {
       const id = await athleteId(client);

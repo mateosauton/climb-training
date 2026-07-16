@@ -4,7 +4,7 @@ import { createCloudRepository, type CloudQueryClient } from "./cloud-repository
 
 type Call = {
   table: string;
-  operation: "insert" | "select" | "upsert";
+  operation: "insert" | "select" | "update" | "upsert";
   value?: unknown;
   options?: unknown;
   filters: Array<[string, unknown]>;
@@ -31,6 +31,15 @@ function createFakeClient() {
           calls.push({ table, operation: "upsert", value, options, filters });
           return Promise.resolve({ data: null, error: null });
         },
+        update(value) {
+          calls.push({ table, operation: "update", value, filters });
+          return {
+            eq(column: string, value: unknown) {
+              filters.push([column, value]);
+              return Promise.resolve({ data: null, error: null });
+            }
+          };
+        },
         select() {
           calls.push({ table, operation: "select", filters });
           return {
@@ -55,12 +64,27 @@ describe("cloud repository", () => {
       facts: [{ id: "fact-1", fact_key: "name", value: "Mateo" }],
       sessionLogs: [{ id: "log-1", metrics: { attempts: 4 } }],
       guided: { schemaVersion: 1, activeRun: null, history: [] },
-      activePlan: { id: "plan-1" }
+      activePlan: { id: "plan-1" },
+      profile: { avatar_path: "athlete-1/avatar.webp" }
     }, error: null });
 
     await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
-      facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" }
+      facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" },
+      profile: { avatarPath: "athlete-1/avatar.webp" }
     });
+  });
+
+  it("persists the profile photo path for the authenticated athlete", async () => {
+    const fake = createFakeClient();
+
+    await createCloudRepository(fake.client).saveAvatarPath("athlete-1/avatar.png");
+
+    expect(fake.calls).toEqual([{
+      table: "athlete_profiles",
+      operation: "update",
+      value: { avatar_path: "athlete-1/avatar.png" },
+      filters: [["id", "athlete-1"]]
+    }]);
   });
 
   it("uses caller-stable IDs when retrying facts, logs, and guided state", async () => {

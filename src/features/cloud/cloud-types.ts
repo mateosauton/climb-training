@@ -33,6 +33,11 @@ export type CloudHydration = {
   sessionLogs: Record<string, JsonValue>[];
   guided: JsonValue;
   activePlan: ActivePlan | null;
+  profile?: CloudProfile;
+};
+
+export type CloudProfile = {
+  avatarPath: string | null;
 };
 
 export type FactWrite = {
