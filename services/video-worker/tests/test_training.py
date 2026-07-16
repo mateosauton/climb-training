@@ -35,6 +35,11 @@ def test_fit_produces_real_weights_metrics_and_no_demographics() -> None:
     validate_artifact(artifact)
     assert any(abs(value) > 0.01 for value in artifact["model"]["coefficients"])
     assert artifact["metrics"]["test"]["roc_auc"] > 0.9
+    assert artifact["metrics"]["test"]["positive_count"] == 10
+    assert artifact["metrics"]["test"]["negative_count"] == 30
+    assert 0 <= artifact["metrics"]["test"]["balanced_accuracy"] <= 1
+    assert 0 <= artifact["metrics"]["test"]["precision"] <= 1
+    assert 0 <= artifact["metrics"]["test"]["recall"] <= 1
 
     def keys(value):  # type: ignore[no-untyped-def]
         if isinstance(value, dict):

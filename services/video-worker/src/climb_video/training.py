@@ -66,8 +66,21 @@ def _metrics(labels: np.ndarray, probabilities: np.ndarray, threshold: float) ->
     tp = int(np.sum(predicted & (labels == 1)))
     fp = int(np.sum(predicted & (labels == 0)))
     fn = int(np.sum(~predicted & (labels == 1)))
+    tn = int(np.sum(~predicted & (labels == 0)))
     f1 = 2 * tp / max(2 * tp + fp + fn, 1)
-    return {"roc_auc": round(float(auc), 4), "average_precision": round(ap, 4), "f1": round(f1, 4)}
+    recall = tp / max(tp + fn, 1)
+    threshold_precision = tp / max(tp + fp, 1)
+    specificity = tn / max(tn + fp, 1)
+    return {
+        "positive_count": int(positives),
+        "negative_count": int(negatives),
+        "roc_auc": round(float(auc), 4),
+        "average_precision": round(ap, 4),
+        "balanced_accuracy": round((recall + specificity) / 2, 4),
+        "precision": round(threshold_precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+    }
 
 
 def fit_contact_prior(
@@ -133,7 +146,7 @@ def fit_contact_prior(
         "training": {
             "seed": seed,
             "fps": 1,
-            "transition_tolerance_seconds": 0.75,
+            "transition_tolerance_seconds": 0.5,
             "split": "participant-disjoint-70-15-15",
             "participant_counts": {name: len(groups) for name, groups in splits.items()},
             "sample_counts": {name: len(items) for name, items in by_split.items()},
@@ -157,14 +170,14 @@ def validate_artifact(artifact: dict[str, Any]) -> None:
         raise ValueError("invalid dataset license")
 
 
-def _transitions(csv_path: Path) -> list[int]:
+def _contact_starts(csv_path: Path) -> list[int]:
     result: list[int] = []
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.reader(handle)
         next(reader, None)
         for row in reader:
             if len(row) >= 3:
-                result.extend([int(row[1]), int(row[2])])
+                result.append(int(row[1]))
     return result
 
 
@@ -174,7 +187,7 @@ def extract_training_samples(root: Path) -> list[TrainingSample]:
         annotation = video.with_name(f"{video.stem}_holdUsage.csv")
         if not annotation.exists() or video.stem.endswith("_large"):
             continue
-        transitions = _transitions(annotation)
+        transitions = _contact_starts(annotation)
         capture = cv2.VideoCapture(str(video))
         source_fps = capture.get(cv2.CAP_PROP_FPS) or 25
         participant = video.parent.name
@@ -189,7 +202,7 @@ def extract_training_samples(root: Path) -> list[TrainingSample]:
             frame_number = round(second * source_fps)
             label = int(
                 any(
-                    abs(frame_number - transition) <= source_fps * 0.75
+                    abs(frame_number - transition) <= source_fps * 0.5
                     for transition in transitions
                 )
             )
