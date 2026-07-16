@@ -121,8 +121,17 @@ import { guidedSessionDefinitions } from "@/features/guided-session/guided-sessi
 import { appendChangedFacts, projectTrackerState } from "@/features/user-data/user-facts";
 import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
+import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
+import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
-import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
+import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
+import { createCloudClient } from "@/features/cloud/cloud-client";
+import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
+import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
+import type { CloudRepository } from "@/features/cloud/cloud-repository";
+import type { CloudImport } from "@/features/cloud/cloud-import";
+import { readAuthConfig } from "@/features/auth/auth-config";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import {
   defaultState,
@@ -137,6 +146,7 @@ const THEME_STORAGE_KEY = "climb4w.theme";
 const DB_NAME = "climb4w.videos";
 const DB_VERSION = 1;
 const VIDEO_STORE = "videos";
+const cloudVideoClient = createCloudClient(readAuthConfig(import.meta.env));
 
 const defaultLogValues = {
   rpe: "8",
@@ -293,8 +303,7 @@ function applyTheme(theme) {
 }
 
 function makeId() {
-  if (crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return crypto.randomUUID();
 }
 
 function sessionById(id) {
@@ -1237,7 +1246,13 @@ export default function App({
   authUser = { id: "test-user", email: null },
   onSignOut = async () => undefined,
   authError = null,
-  signingOut = false
+  signingOut = false,
+  cloudRepository = null,
+  cloudImport = null,
+  loadLegacyVideoBlob = getVideo,
+  uploadLegacyVideo = null,
+  cloudVerified = false,
+  cloudHydration = null
 }) {
   const [initialUserLoad] = useState(() => {
     const loaded = loadUserData(localStorage, {
@@ -1246,13 +1261,45 @@ export default function App({
       normalizeLegacyTracker: normalizeState,
       guidedDefinitions: guidedSessionDefinitions
     });
-    const envelope = activateAuthenticatedUser(loaded.envelope, authUser, { now: new Date().toISOString(), makeId });
+    const canonical = cloudVerified
+      ? migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: emptyGuidedSessionState(), now: new Date().toISOString(), makeId })
+      : loaded.envelope;
+    let envelope = activateAuthenticatedUser(canonical, authUser, { now: new Date().toISOString(), makeId });
     let warning = loaded.warning;
-    if (loaded.canPersist) {
+    if (loaded.canPersist && !cloudVerified) {
       const saved = saveUserData(localStorage, envelope);
       if (saved.ok === false) warning = `No pudimos guardar los datos locales: ${saved.error}`;
     }
-    return { ...loaded, envelope, warning };
+    if (cloudHydration) {
+      const active = envelope.users[envelope.activeUserId];
+      const facts = (cloudHydration.facts || []).map((fact) => ({
+        id: fact.id,
+        userId: active.identity.id,
+        category: fact.source?.category || "preference",
+        key: fact.fact_key || fact.key,
+        value: fact.value,
+        unit: fact.source?.unit || null,
+        recordedAt: fact.created_at || fact.recordedAt,
+        source: fact.source || { type: "import", field: fact.fact_key || fact.key, version: 1 },
+        supersedes: fact.supersedes_id || fact.supersedes || null
+      }));
+      const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
+        id: log.id,
+        sessionId: log.metrics?.sessionId || log.session_id || "w1d1",
+        createdAt: log.created_at || log.createdAt,
+        notes: log.body || log.metrics?.notes || "",
+        ...log.metrics,
+        rpe: log.rpe ?? log.metrics?.rpe ?? 0,
+        pump: log.pump ?? log.metrics?.pump ?? 0,
+        pain: log.pain ?? log.metrics?.pain ?? 0,
+        energy: log.energy ?? log.metrics?.energy ?? 0
+      }));
+      envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: {
+        ...active, facts, sessionLogs,
+        guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
+      } } };
+    }
+    return { ...loaded, envelope, recoveryEnvelope: loaded.envelope, warning };
   });
   const [userData, setUserData] = useState(initialUserLoad.envelope);
   const [userDataWarning, setUserDataWarning] = useState(initialUserLoad.warning);
@@ -1271,25 +1318,59 @@ export default function App({
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
+  const [pendingVideoId, setPendingVideoId] = useState(null);
   const [videoValues, setVideoValues] = useState(defaultVideoValues);
   const [videoNotes, setVideoNotes] = useState("");
   const [showJson, setShowJson] = useState(false);
   const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
+  const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
+  const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
+  const pendingQuestionnaire = useRef(null);
+  const pendingFacts = useRef([]);
+  const pendingLog = useRef(null);
+  const pendingGuided = useRef(null);
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
-    body: "Sube un clip MP4, MOV o WebM. El analisis queda guardado localmente."
+    body: "Sube un clip MP4, MOV o WebM. Conservamos una copia local hasta verificar la carga privada."
   });
   const detailRef = useRef(null);
   const videoRef = useRef(null);
   const skipInitialUserSave = useRef(true);
 
   useEffect(() => {
+    const pending = activeUser.videoAnalyses.find((video) => video.cloud && video.cloud.uploadStatus !== "uploaded");
+    if (!pending || pendingVideoId || videoFile) return;
+    const recover = async () => {
+      if (cloudVideoClient) {
+        const service = createCloudVideoService(cloudVideoClient);
+        const recovered = await reconcileUploadedVideoRecovery(pending, {
+          reconciledUpload: service.reconciledUpload,
+          appendAnalysis: service.appendAnalysis,
+          persistUploaded: (videoId, path) => persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === videoId ? { ...video, cloud: { id: video.cloud?.id || videoId, path, uploadStatus: "uploaded" } } : video) })),
+          deleteBlob: deleteVideoBlob
+        }).catch(() => false);
+        if (recovered) return;
+      }
+      const blob = await getVideo(pending.id);
+      if (!blob) return;
+      const file = blob instanceof File ? blob : new File([blob], pending.fileName, { type: `video/${pending.fileName.split(".").pop()}` });
+      setVideoFile(file);
+      setVideoMeta({ name: pending.fileName, size: pending.size, duration: pending.duration });
+      setPendingVideoId(pending.id);
+      setSelectedSessionId(pending.sessionId);
+      setVideoUrl(URL.createObjectURL(file));
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "Recuperamos tu video local. Puedes reintentar la carga privada." });
+    };
+    recover().catch(() => undefined);
+  }, [activeUser.videoAnalyses, pendingVideoId, videoFile]);
+
+  useEffect(() => {
     if (skipInitialUserSave.current) {
       skipInitialUserSave.current = false;
       return;
     }
-    if (!initialUserLoad.canPersist) return;
+    if (!initialUserLoad.canPersist || cloudVerified) return;
     const result = saveUserData(localStorage, userData);
     if (!result.ok) setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
   }, [initialUserLoad.canPersist, userData]);
@@ -1457,23 +1538,12 @@ export default function App({
       return current.users[current.activeUserId].guidedSessions;
     },
     replaceGuidedSessions: (guidedSessions) => {
-      setUserData((current) => {
-        const userId = current.activeUserId;
-        const user = current.users[userId];
-        const next = {
-          ...current,
-          users: {
-            ...current.users,
-            [userId]: {
-              ...user,
-              identity: { ...user.identity, updatedAt: new Date().toISOString() },
-              guidedSessions
-            }
-          }
-        };
-        userDataRef.current = next;
-        return next;
-      });
+      const persisted = persistActiveUser((user) => ({
+        ...user,
+        identity: { ...user.identity, updatedAt: new Date().toISOString() },
+        guidedSessions
+      }));
+      if (persisted) void saveGuidedToCloud(guidedSessions);
     }
   }), []);
 
@@ -1487,6 +1557,81 @@ export default function App({
       userDataRef.current = next;
       return next;
     });
+  }
+
+  function persistActiveUser(update) {
+    const current = userDataRef.current;
+    const userId = current.activeUserId;
+    const nextUser = update(current.users[userId]);
+    const next = nextUser === current.users[userId] ? current : { ...current, users: { ...current.users, [userId]: nextUser } };
+    const result = persistRecoveryBeforeCloudEffect(localStorage, next);
+    if (!result.ok) {
+      setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
+      return false;
+    }
+    userDataRef.current = next;
+    setUserData(next);
+    return true;
+  }
+
+  async function importLocalRecovery() {
+    if (!cloudImport || importStatus === "importing") return;
+    setImportStatus("importing");
+    try {
+      let receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope);
+      if (receipt.status === "metadata_imported" && receipt.pendingVideoIds.length) {
+        const upload = uploadLegacyVideo ?? (cloudVideoClient ? createCloudVideoService(cloudVideoClient).upload : null);
+        if (!upload) throw { code: "legacy_video_unavailable" };
+        const user = initialUserLoad.recoveryEnvelope.users[initialUserLoad.recoveryEnvelope.activeUserId];
+        const completedVideoIds = await stageLegacyImportVideos({
+          pendingVideoIds: receipt.pendingVideoIds,
+          videos: user.videoAnalyses,
+          loadBlob: loadLegacyVideoBlob,
+          upload
+        });
+        receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope, completedVideoIds);
+      }
+      // Metadata import is deliberately not treated as completion: local video
+      // recovery must remain visible until the server receipt is complete.
+      setImportStatus(receipt.status === "completed" ? "completed" : "videos_pending");
+    } catch {
+      setImportStatus("failed");
+    }
+  }
+
+  async function submitQuestionnaireToCloud(submission) {
+    if (!cloudRepository || !submission) return;
+    setQuestionnaireCloudStatus("saving");
+    try {
+      await cloudRepository.submitQuestionnaire(submission);
+      pendingQuestionnaire.current = null;
+      setQuestionnaireCloudStatus("saved");
+    } catch {
+      setQuestionnaireCloudStatus("failed");
+    }
+  }
+
+  async function appendFactsToCloud(facts) {
+    if (!cloudRepository || !facts.length) return;
+    pendingFacts.current = facts;
+    try {
+      await cloudRepository.appendFacts(facts);
+      pendingFacts.current = [];
+    } catch {
+      setUserDataWarning("No pudimos sincronizar tu perfil. Tus cambios quedan guardados para reintentar.");
+    }
+  }
+
+  async function saveGuidedToCloud(state) {
+    if (!cloudRepository) return;
+    const pending = pendingGuided.current || { state, idempotencyKey: makeId() };
+    pendingGuided.current = pending;
+    try {
+      await cloudRepository.saveGuidedState(pending.state, pending.idempotencyKey);
+      pendingGuided.current = null;
+    } catch {
+      setUserDataWarning("No pudimos sincronizar la sesión guiada. Tu progreso queda guardado para reintentar.");
+    }
   }
 
   function handleCalendarDate(date) {
@@ -1514,13 +1659,16 @@ export default function App({
       focus: field("focus", state.goals.focus),
       ...Object.fromEntries(profileFields.map((name) => [name, field(name, state.profile[name])]))
     };
+    let appended = [];
     updateActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "profile-form", version: 1 }, now, makeId);
+      appended = next.facts.slice(current.facts.length);
       return {
         ...next,
         identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now }
       };
     });
+    void appendFactsToCloud(appended);
   }
 
   function saveQuestionnaire(payload) {
@@ -1536,21 +1684,43 @@ export default function App({
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
     };
-    updateActiveUser((current) => {
+    const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      void appendFactsToCloud(next.facts.slice(current.facts.length));
       return { ...next, identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now } };
     });
+    if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
+    if (cloudRepository) {
+      const submission = {
+        version: QUESTIONNAIRE_VERSION,
+        answers: values,
+        idempotencyKey: makeId()
+      };
+      pendingQuestionnaire.current = submission;
+      void submitQuestionnaireToCloud(submission);
+    }
   }
 
   function skipQuestionnaire() {
     const now = new Date().toISOString();
-    updateActiveUser((current) => appendChangedFacts(current, {
+    const values = {
       questionnaireCompleted: true,
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
-    }, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId));
+    };
+    const recoveryPersisted = persistActiveUser((current) => {
+      const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      void appendFactsToCloud(next.facts.slice(current.facts.length));
+      return next;
+    });
+    if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
+    if (cloudRepository) {
+      const submission = { version: QUESTIONNAIRE_VERSION, answers: values, idempotencyKey: makeId() };
+      pendingQuestionnaire.current = submission;
+      void submitQuestionnaireToCloud(submission);
+    }
   }
 
   function selectSession(sessionId, scroll = false) {
@@ -1609,6 +1779,14 @@ export default function App({
       notes: logForm.notes,
       ...values
     };
+    if (!persistActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }))) return;
+    if (cloudRepository) {
+      const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
+      pendingLog.current = submission;
+      void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
+        setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
+      });
+    }
     updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
     setSavedRecommendation({
       log,
@@ -1636,6 +1814,11 @@ export default function App({
         body: "Selecciona un archivo de video compatible."
       });
       return;
+    }
+    if (pendingVideoId) {
+      deleteVideoBlob(pendingVideoId).catch(() => undefined);
+      updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.filter((video) => video.id !== pendingVideoId) }));
+      setPendingVideoId(null);
     }
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(file);
@@ -1667,7 +1850,7 @@ export default function App({
       });
       return;
     }
-    const id = makeId();
+    const id = pendingVideoId || makeId();
     const advice = buildAdvice(videoValues, recentPain);
     try {
       await putVideo(id, videoFile);
@@ -1679,41 +1862,81 @@ export default function App({
       });
       return;
     }
-    updateActiveUser((current) => ({
+    const recoveryPersisted = persistActiveUser((current) => current.videoAnalyses.some((video) => video.id === id) ? current : ({
       ...current,
-      videoAnalyses: [
-        ...current.videoAnalyses,
-        {
-          id,
-          createdAt: new Date().toISOString(),
-          sessionId: selectedSessionId,
-          fileName: videoMeta.name,
-          duration: videoMeta.duration,
-          size: videoMeta.size,
-          notes: videoNotes,
-          ...videoValues,
-          advice
-        }
-      ]
+      videoAnalyses: [...current.videoAnalyses, {
+        id,
+        createdAt: new Date().toISOString(),
+        sessionId: selectedSessionId,
+        fileName: videoMeta.name,
+        duration: videoMeta.duration,
+        size: videoMeta.size,
+        notes: videoNotes,
+        ...videoValues,
+        advice,
+        cloud: { id, path: videoPath(authUser.id, id, videoMeta.name), uploadStatus: "pending" }
+      }]
     }));
-    setVideoStatus({
-      tone: "ready",
-      title: "Analisis guardado",
-      body: "Quedo en el archivo local de videos y puede abrirse desde el historial."
-    });
+    if (!recoveryPersisted) {
+      setVideoStatus({ tone: "error", title: "No se pudo guardar", body: "No confirmamos la recuperación local, así que no iniciamos ninguna carga privada." });
+      return;
+    }
+    setPendingVideoId(id);
+    if (!cloudVideoClient) {
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "No hay conexión privada configurada. El archivo queda guardado localmente para recuperar o reintentar." });
+      return;
+    }
+    try {
+      const service = createCloudVideoService(cloudVideoClient);
+      const uploaded = await service.upload(videoFile, { videoId: id, durationSeconds: videoMeta.duration });
+      if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "analysis_pending" } } : video) }))) {
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El video privado se cargó, pero conservamos la recuperación local hasta guardar el estado del análisis." });
+        return;
+      }
+      await service.appendAnalysis(id, {
+        status: "completed",
+        metrics: { session_id: selectedSessionId, notes: videoNotes, foot_cuts: videoValues.footCuts, swing: videoValues.swing, hips: videoValues.hips, shoulder: videoValues.shoulder, breath: videoValues.breath, reading: videoValues.reading },
+        advice: { recommendations: advice }
+      });
+      if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "uploaded" } } : video) }))) {
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis terminó, pero conservamos la recuperación local hasta guardar su confirmación." });
+        return;
+      }
+      await deleteVideoBlob(id);
+      setPendingVideoId(null);
+      setVideoStatus({ tone: "ready", title: "Analisis guardado", body: "El video se guardó en tu archivo privado. La copia local temporal ya se eliminó." });
+    } catch (error) {
+      const uploadStatus = error?.code === "upload_pending" ? "pending" : "analysis_pending";
+      persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { ...(video.cloud || { id, path: videoPath(authUser.id, id, videoMeta.name) }), uploadStatus } } : video) }));
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis y el archivo siguen guardados localmente. Puedes volver a intentar sin perder el video." });
+    }
   }
 
   async function openSavedVideo(id) {
     const blob = await getVideo(id);
-    if (!blob) {
-      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "El archivo no esta en IndexedDB." });
+    if (blob) {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(URL.createObjectURL(blob));
+      setVideoFile(null);
+      setActiveTab("video");
+      setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde el reproductor." });
       return;
     }
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setVideoUrl(URL.createObjectURL(blob));
-    setVideoFile(null);
-    setActiveTab("video");
-    setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde el reproductor." });
+    const saved = activeUser.videoAnalyses.find((video) => video.id === id);
+    if (!cloudVideoClient || !saved) {
+      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
+      return;
+    }
+    try {
+      const signedUrl = await createCloudVideoService(cloudVideoClient).playbackUrl(saved.cloud?.id || id);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(signedUrl);
+      setVideoFile(null);
+      setActiveTab("video");
+      setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde un enlace privado temporal." });
+    } catch {
+      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
+    }
   }
 
   async function removeVideo(id) {
@@ -1748,12 +1971,13 @@ export default function App({
     setVideoFile(null);
     setVideoUrl("");
     setVideoMeta(null);
+    setPendingVideoId(null);
     setVideoValues(defaultVideoValues);
     setVideoNotes("");
     setVideoStatus({
       tone: "muted",
       title: "Listo para analizar",
-      body: "Sube un clip MP4, MOV o WebM. El analisis queda guardado localmente."
+      body: "Sube un clip MP4, MOV o WebM. Conservamos una copia local hasta verificar la carga privada."
     });
   }
 
@@ -1783,6 +2007,21 @@ export default function App({
               signingOut={signingOut}
             />
             <SidebarInset className="min-w-0 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-0">
+              {importStatus !== "idle" && importStatus !== "completed" ? (
+                <div role={importStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <div>
+                    <p className="font-medium">{importStatus === "failed" ? "No pudimos importar tus datos" : importStatus === "importing" ? "Importando datos locales…" : importStatus === "videos_pending" ? "Importación de videos pendiente" : "Importación pendiente"}</p>
+                    <p className="text-muted-foreground">Tu copia local se conserva hasta que el recibo de la nube confirme la importación completa.</p>
+                  </div>
+                  {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : importStatus === "videos_pending" ? "Reintentar videos" : "Importar datos locales"}</Button> : null}
+                </div>
+              ) : null}
+              {questionnaireCloudStatus === "saving" || questionnaireCloudStatus === "failed" ? (
+                <div role={questionnaireCloudStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <p>{questionnaireCloudStatus === "saving" ? "Guardando cuestionario en la nube…" : "No pudimos guardar el cuestionario en la nube. Tus respuestas siguen disponibles para reintentar."}</p>
+                  {questionnaireCloudStatus === "failed" ? <Button type="button" variant="outline" onClick={() => void submitQuestionnaireToCloud(pendingQuestionnaire.current)}>Reintentar cuestionario</Button> : null}
+                </div>
+              ) : null}
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-auto" />
@@ -2542,7 +2781,7 @@ export default function App({
                     <div className="flex flex-wrap gap-2">
                       <Button type="submit" disabled={!videoFile || !videoMeta}>
                         <Save className="size-4" />
-                        Guardar analisis
+                        {pendingVideoId ? "Reintentar carga" : "Guardar analisis"}
                       </Button>
                       <Button type="button" variant="outline" onClick={() => setVideoValues(defaultVideoValues)}>
                         <RefreshCcw className="size-4" />

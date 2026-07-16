@@ -3,7 +3,7 @@ import { defaultState, type TrackerState } from "../../lib/training";
 import { guidedSessionDefinitions } from "../guided-session/guided-session-data";
 import { emptyGuidedSessionState, GUIDED_STORAGE_KEY } from "../guided-session/guided-session-storage";
 import { migrateLegacyUserData } from "./user-data-migration";
-import { loadUserData, saveUserData, USER_DATA_STORAGE_KEY } from "./user-data-storage";
+import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData, USER_DATA_STORAGE_KEY } from "./user-data-storage";
 
 const at = "2026-07-14T12:00:00.000Z";
 const ids = () => { let index = 0; return () => `id-${++index}`; };
@@ -13,12 +13,26 @@ const options = (makeId = ids()) => ({ now: () => at, makeId, normalizeLegacyTra
 describe("user data storage", () => {
   beforeEach(() => localStorage.clear());
 
+  it("persists pending recovery metadata before a cloud side effect and reload boundary", () => {
+    const envelope = loadUserData(localStorage, options()).envelope;
+    const user = envelope.users[envelope.activeUserId];
+    user.videoAnalyses.push({
+      id: "video-1", sessionId: "w1d1", createdAt: at, fileName: "move.mp4", duration: 10, size: 100,
+      notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0,
+      advice: [{ title: "Control", body: "Respira." }],
+      cloud: { id: "video-1", path: "athlete-1/video-1/original.mp4", uploadStatus: "pending" }
+    });
+
+    expect(persistRecoveryBeforeCloudEffect(localStorage, envelope)).toEqual({ ok: true });
+    expect(loadUserData(localStorage, options()).envelope.users[envelope.activeUserId].videoAnalyses).toEqual(user.videoAnalyses);
+  });
+
   it("loads valid v2 without inspecting or rewriting legacy data", () => {
     const envelope = migrateLegacyUserData({ tracker: defaultState, guided: emptyGuidedSessionState(), now: at, makeId: ids() });
     envelope.users[envelope.activeUserId].videoAnalyses.push({ id: "video", sessionId: "w1d1", createdAt: at, fileName: "move.mp4", duration: 10, size: 100, notes: "", footCuts: 0, swing: 0, hips: 0, shoulder: 0, breath: 0, reading: 0, advice: [{ title: "Control", body: "Respira." }] });
     localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
     localStorage.setItem("climb4w.state.v1", "not-json");
-    expect(loadUserData(localStorage, options())).toEqual({ envelope, warning: null, migrated: false, canPersist: true });
+    expect(loadUserData(localStorage, options())).toEqual({ envelope, warning: null, migrated: false, hasRecoveryEnvelope: true, canPersist: true });
   });
 
   it("migrates legacy state and guided progress once with a stable user ID", () => {
