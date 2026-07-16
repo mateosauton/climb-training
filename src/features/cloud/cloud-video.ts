@@ -10,6 +10,7 @@ type StoredObject = { name: string; metadata?: { size?: number | string } };
 
 export type VideoUploadFailure = { code: "unauthenticated" | "invalid_video_path" | "file_mismatch" | "upload_pending" | "unavailable"; videoId?: string; path?: string };
 export type VideoFile = Blob & { name: string; type: string; size: number };
+export type RequestVideoAnalysis = (videoId: string, idempotencyKey: string) => Promise<string>;
 
 export interface CloudVideoClient {
   auth: { getUser(): PromiseLike<CloudResult<{ user: { id: string } | null }>> };
@@ -24,16 +25,8 @@ export interface CloudVideoClient {
     update(values: Record<string, JsonValue>): { eq(column: string, value: string): PromiseLike<CloudResult> };
     select(columns: string): { eq(column: string, value: string): { maybeSingle(): PromiseLike<CloudResult<VideoAsset | null>> } };
   };
-  rpc(name: "append_video_analysis", values: Record<string, JsonValue>): PromiseLike<CloudResult>;
+  rpc(name: "request_video_analysis", values: Record<string, JsonValue>): PromiseLike<CloudResult>;
 }
-
-export type VideoAnalysisPayload = {
-  status: "completed" | "failed";
-  metrics: Record<string, JsonValue>;
-  advice: Record<string, JsonValue>;
-};
-
-export type AppendVideoAnalysis = (videoId: string, payload: VideoAnalysisPayload) => Promise<void>;
 
 export function videoPath(userId: string, videoId: string, fileName: string): string {
   const extension = fileName.trim().split(".").pop()?.toLowerCase();
@@ -130,15 +123,13 @@ export function createCloudVideoService(
       return signed.data.signedUrl;
     },
 
-    async appendAnalysis(videoId: string, payload: VideoAnalysisPayload) {
-      const result = await client.rpc("append_video_analysis", {
-        p_video_asset_id: videoId, p_status: payload.status, p_metrics: payload.metrics, p_advice: payload.advice
+    async requestAnalysis(videoId: string, idempotencyKey: string): Promise<string> {
+      const result = await client.rpc("request_video_analysis", {
+        p_video_asset_id: videoId,
+        p_idempotency_key: idempotencyKey
       });
-      if (result.error) throw failure("unavailable", videoId);
+      if (result.error || typeof result.data !== "string") throw failure("unavailable", videoId);
+      return result.data;
     }
   };
-}
-
-export async function appendVideoAnalysis(append: AppendVideoAnalysis, videoId: string, payload: VideoAnalysisPayload): Promise<void> {
-  await append(videoId, payload);
 }

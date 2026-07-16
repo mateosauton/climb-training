@@ -129,6 +129,7 @@ import { buildSessionRecommendation } from "@/features/session-recommendation/se
 import { readAuthConfig } from "@/features/auth/auth-config";
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService } from "@/features/cloud/cloud-video";
+import { loadVideoIntelligenceHistory } from "@/features/cloud/video-history";
 import {
   defaultState,
   exerciseLibrary,
@@ -143,6 +144,23 @@ const DB_NAME = "climb4w.videos";
 const DB_VERSION = 1;
 const VIDEO_STORE = "videos";
 const cloudVideoClient = createCloudClient(readAuthConfig(import.meta.env));
+const defaultCloudVideoService = cloudVideoClient ? createCloudVideoService(cloudVideoClient) : null;
+const defaultVideoIntelligence = cloudVideoClient
+  ? { loadHistory: () => loadVideoIntelligenceHistory(cloudVideoClient) }
+  : null;
+
+const videoStageLabels = {
+  queued: "En cola",
+  claimed: "Preparando análisis",
+  downloading: "Descargando video",
+  frames: "Extracción de fotogramas",
+  extracting: "Extracción de fotogramas",
+  pose: "Estimación de postura",
+  vision: "Reconocimiento visual",
+  perceiving: "Reconocimiento visual",
+  coaching: "Evaluación del coach",
+  completed: "Completado"
+};
 
 const defaultLogValues = {
   rpe: "8",
@@ -1247,6 +1265,8 @@ export default function App({
   cloudImport = null,
   loadLegacyVideoBlob = getVideo,
   uploadLegacyVideo = null,
+  cloudVideoService = defaultCloudVideoService,
+  videoIntelligence = defaultVideoIntelligence,
   cloudVerified = false,
   cloudHydration = null
 }) {
@@ -1317,6 +1337,8 @@ export default function App({
   const [pendingVideoId, setPendingVideoId] = useState(null);
   const [videoValues, setVideoValues] = useState(defaultVideoValues);
   const [videoNotes, setVideoNotes] = useState("");
+  const [videoHistory, setVideoHistory] = useState({ status: [], recommendations: [], themes: [] });
+  const [videoHistoryState, setVideoHistoryState] = useState("idle");
   const [showJson, setShowJson] = useState(false);
   const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
   const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
@@ -1338,11 +1360,11 @@ export default function App({
     const pending = activeUser.videoAnalyses.find((video) => video.cloud && video.cloud.uploadStatus !== "uploaded");
     if (!pending || pendingVideoId || videoFile) return;
     const recover = async () => {
-      if (cloudVideoClient) {
-        const service = createCloudVideoService(cloudVideoClient);
+      if (cloudVideoService) {
+        const service = cloudVideoService;
         const recovered = await reconcileUploadedVideoRecovery(pending, {
           reconciledUpload: service.reconciledUpload,
-          appendAnalysis: service.appendAnalysis,
+          requestAnalysis: service.requestAnalysis,
           persistUploaded: (videoId, path) => persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === videoId ? { ...video, cloud: { id: video.cloud?.id || videoId, path, uploadStatus: "uploaded" } } : video) })),
           deleteBlob: deleteVideoBlob
         }).catch(() => false);
@@ -1359,7 +1381,29 @@ export default function App({
       setVideoStatus({ tone: "error", title: "Carga pendiente", body: "Recuperamos tu video local. Puedes reintentar la carga privada." });
     };
     recover().catch(() => undefined);
-  }, [activeUser.videoAnalyses, pendingVideoId, videoFile]);
+  }, [activeUser.videoAnalyses, pendingVideoId, videoFile, cloudVideoService]);
+
+  useEffect(() => {
+    if (activeTab !== "video" || !videoIntelligence) return;
+    let current = true;
+    const refresh = async () => {
+      try {
+        const history = await videoIntelligence.loadHistory();
+        if (!current) return;
+        setVideoHistory(history);
+        setVideoHistoryState("ready");
+      } catch {
+        if (current) setVideoHistoryState("failed");
+      }
+    };
+    setVideoHistoryState("loading");
+    void refresh();
+    const interval = window.setInterval(refresh, 5000);
+    return () => {
+      current = false;
+      window.clearInterval(interval);
+    };
+  }, [activeTab, videoIntelligence]);
 
   useEffect(() => {
     if (skipInitialUserSave.current) {
@@ -1878,29 +1922,31 @@ export default function App({
       return;
     }
     setPendingVideoId(id);
-    if (!cloudVideoClient) {
+    if (!cloudVideoService) {
       setVideoStatus({ tone: "error", title: "Carga pendiente", body: "No hay conexión privada configurada. El archivo queda guardado localmente para recuperar o reintentar." });
       return;
     }
     try {
-      const service = createCloudVideoService(cloudVideoClient);
+      const service = cloudVideoService;
       const uploaded = await service.upload(videoFile, { videoId: id, durationSeconds: videoMeta.duration });
       if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "analysis_pending" } } : video) }))) {
         setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El video privado se cargó, pero conservamos la recuperación local hasta guardar el estado del análisis." });
         return;
       }
-      await service.appendAnalysis(id, {
-        status: "completed",
-        metrics: { session_id: selectedSessionId, notes: videoNotes, foot_cuts: videoValues.footCuts, swing: videoValues.swing, hips: videoValues.hips, shoulder: videoValues.shoulder, breath: videoValues.breath, reading: videoValues.reading },
-        advice: { recommendations: advice }
-      });
+      await service.requestAnalysis(id, `${id}:first-analysis`);
       if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "uploaded" } } : video) }))) {
-        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis terminó, pero conservamos la recuperación local hasta guardar su confirmación." });
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "La solicitud quedó en cola, pero conservamos la recuperación local hasta guardar su confirmación." });
         return;
       }
       await deleteVideoBlob(id);
       setPendingVideoId(null);
-      setVideoStatus({ tone: "ready", title: "Analisis guardado", body: "El video se guardó en tu archivo privado. La copia local temporal ya se eliminó." });
+      setVideoStatus({ tone: "ready", title: "Análisis en cola", body: "El video está seguro en tu archivo privado. El coach actualizará el progreso y las recomendaciones aquí." });
+      if (videoIntelligence) {
+        void videoIntelligence.loadHistory().then((history) => {
+          setVideoHistory(history);
+          setVideoHistoryState("ready");
+        }).catch(() => setVideoHistoryState("failed"));
+      }
     } catch (error) {
       const uploadStatus = error?.code === "upload_pending" ? "pending" : "analysis_pending";
       persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { ...(video.cloud || { id, path: videoPath(authUser.id, id, videoMeta.name) }), uploadStatus } } : video) }));
@@ -1919,12 +1965,12 @@ export default function App({
       return;
     }
     const saved = activeUser.videoAnalyses.find((video) => video.id === id);
-    if (!cloudVideoClient || !saved) {
+    if (!cloudVideoService || !saved) {
       setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
       return;
     }
     try {
-      const signedUrl = await createCloudVideoService(cloudVideoClient).playbackUrl(saved.cloud?.id || id);
+      const signedUrl = await cloudVideoService.playbackUrl(saved.cloud?.id || id);
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       setVideoUrl(signedUrl);
       setVideoFile(null);
@@ -2790,6 +2836,70 @@ export default function App({
             </div>
 
             <div className="space-y-4">
+              {videoHistory.status.some((item) => item.state === "queued" || item.state === "processing") ? (
+                <Card className="overflow-hidden border-primary/35 bg-card/90">
+                  <div className="h-1 bg-primary" />
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="size-5 text-primary" />
+                      Análisis en curso
+                    </CardTitle>
+                    <CardDescription>El progreso se actualiza mientras el motor revisa el clip fotograma a fotograma.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {videoHistory.status
+                      .filter((item) => item.state === "queued" || item.state === "processing")
+                      .map((item) => (
+                        <div key={item.job_id} className="space-y-2 rounded-lg border border-border/70 bg-background/50 p-3">
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="font-medium">{videoStageLabels[item.stage] || item.stage}</span>
+                            <Badge variant="outline">{item.progress}%</Badge>
+                          </div>
+                          <p className="sr-only">{videoStageLabels[item.stage] || item.stage} · {item.progress}%</p>
+                          <Progress value={item.progress} aria-label={`Progreso del análisis: ${item.progress}%`} />
+                        </div>
+                      ))}
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              <Card className="border-border/70 bg-card/90">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ListChecks className="size-5 text-primary" />
+                    Historial del coach
+                  </CardTitle>
+                  <CardDescription>Recomendaciones acumuladas a través de todos tus videos.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {videoHistoryState === "loading" ? (
+                    <p role="status" className="text-sm text-muted-foreground">Cargando historial…</p>
+                  ) : videoHistoryState === "failed" ? (
+                    <p role="alert" className="text-sm text-destructive">No pudimos actualizar el historial. Volveremos a intentarlo.</p>
+                  ) : videoHistory.recommendations.length ? (
+                    videoHistory.recommendations.map((recommendation) => (
+                      <article key={recommendation.id} className="rounded-lg border border-border/70 bg-background/50 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <h3 className="font-medium">{recommendation.title}</h3>
+                          <Badge variant="outline">P{recommendation.priority}</Badge>
+                        </div>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{recommendation.body}</p>
+                      </article>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
+                      Las recomendaciones del coach aparecerán al completar el primer análisis.
+                    </div>
+                  )}
+                  {videoHistory.themes[0]?.coaching_summary ? (
+                    <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-primary">Tendencia entre videos</p>
+                      <p className="mt-1 text-sm leading-6">{videoHistory.themes[0].coaching_summary}</p>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+
               <Card className="border-border/70 bg-card/90 xl:sticky xl:top-20">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">

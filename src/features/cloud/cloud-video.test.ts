@@ -27,7 +27,7 @@ function fakeClient({ uploadError, metadataError, asset, objects, downloaded }: 
   const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ maybeSingle }) });
   const list = vi.fn().mockResolvedValue({ data: objects ?? [{ name: "original.mp4", metadata: { size: 4 } }], error: null });
   const download = vi.fn().mockResolvedValue({ data: downloaded ?? new Blob(["clip"]), error: null });
-  const rpc = vi.fn().mockResolvedValue({ error: null });
+  const rpc = vi.fn().mockResolvedValue({ data: "job-1", error: null });
   return {
     client: {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "athlete-1" } }, error: null }) },
@@ -125,17 +125,15 @@ describe("cloud video lifecycle", () => {
     expect(fake.upload).not.toHaveBeenCalled();
   });
 
-  it("appends every analysis through the JWT-bound RPC without accepting a caller supplied version", async () => {
+  it("requests an asynchronous analysis through the JWT-bound RPC with a stable key", async () => {
     const fake = fakeClient();
     const service = createCloudVideoService(fake.client);
 
-    await service.appendAnalysis("video-1", { status: "completed", metrics: { foot_cuts: 2 }, advice: { recommendations: [] } });
+    await expect(service.requestAnalysis("video-1", "video-1:first-analysis")).resolves.toBe("job-1");
 
-    expect(fake.rpc).toHaveBeenCalledWith("append_video_analysis", {
+    expect(fake.rpc).toHaveBeenCalledWith("request_video_analysis", {
       p_video_asset_id: "video-1",
-      p_status: "completed",
-      p_metrics: { foot_cuts: 2 },
-      p_advice: { recommendations: [] }
+      p_idempotency_key: "video-1:first-analysis"
     });
   });
 
