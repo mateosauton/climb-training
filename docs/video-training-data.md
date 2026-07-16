@@ -8,7 +8,7 @@ Only footage with documented download, commercial-use, derivative, and model-tra
 
 CC BY 4.0 requires appropriate credit, a license link, and an indication of changes. Keep the registry attribution in dataset manifests, model cards, and evaluation reports. Treat pose and movement data as person data: do not identify participants or use the dataset for biometric profiling.
 
-The dataset is appropriate for evaluation and targeted pose/hold-contact work. It is not enough to train an 8B vision-language model from scratch. Before extraction, assign participant and route groups so neither crosses training, validation, or test splits.
+The dataset is appropriate for evaluation and targeted pose/hold-contact work. It is not enough to train an 8B vision-language model from scratch. Before extraction, assign participant-disjoint splits and stratify both routes across each split. Treat `p2a` and `p2b` as the same participant so repeated recordings never cross splits.
 
 ## Verify provenance without downloading video
 

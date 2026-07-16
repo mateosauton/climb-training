@@ -75,12 +75,15 @@
         "annotatedHoldUsages": 940
       },
       "splitPolicy": {
-        "status": "provisional-until-identities-are-inspected",
+        "status": "approved-for-hold-contact-training",
         "groupKeys": [
-          "participantId",
+          "participantId"
+        ],
+        "stratifyBy": [
           "routeId"
         ],
-        "rule": "Assign participant and route groups before extracting frames; no participant or route may cross train, validation, or test splits.",
+        "identityNormalization": "Treat p2a and p2b as participant p2 so repeated recordings never cross splits.",
+        "rule": "Assign participant groups before extracting frames; no participant may cross train, validation, or test splits. Balance both routes within every split.",
         "defaultUse": "evaluation",
         "vlmTraining": "disabled-until-coach-review",
         "poseHoldContactTraining": "allowed-after-privacy-review"
