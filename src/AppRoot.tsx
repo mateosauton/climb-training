@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./features/auth/AuthProvider";
 import type { CloudRepository } from "./features/cloud/cloud-repository";
 import type { CloudHydration } from "./features/cloud/cloud-types";
 import type { CloudImport } from "./features/cloud/cloud-import";
+import type { CloudAvatarClient } from "./features/cloud/cloud-avatar";
 
 type AppRootProps = {
   client: AuthClient | null;
@@ -16,9 +17,10 @@ type AppRootProps = {
   baseUrl: string;
   repository?: CloudRepository | null;
   cloudImport?: CloudImport | null;
+  cloudAvatarClient?: CloudAvatarClient | null;
 };
 
-function CloudBootstrap({ user, repository, cloudImport }: { user: AuthUser; repository: CloudRepository | null | undefined; cloudImport: CloudImport | null | undefined }) {
+function CloudBootstrap({ user, repository, cloudImport, cloudAvatarClient }: { user: AuthUser; repository: CloudRepository | null | undefined; cloudImport: CloudImport | null | undefined; cloudAvatarClient: CloudAvatarClient | null | undefined }) {
   const auth = useAuth();
   const [attempt, setAttempt] = useState(0);
   const [ready, setReady] = useState(!repository);
@@ -65,15 +67,16 @@ function CloudBootstrap({ user, repository, cloudImport }: { user: AuthUser; rep
       cloudImport={cloudImport}
       cloudVerified={Boolean(repository)}
       cloudHydration={hydration}
+      cloudAvatarClient={cloudAvatarClient}
     />
   );
 }
 
-export function AppRoot({ client, config, origin, baseUrl, repository, cloudImport }: AppRootProps) {
+export function AppRoot({ client, config, origin, baseUrl, repository, cloudImport, cloudAvatarClient }: AppRootProps) {
   const redirectTo = authRedirectUrl(origin, baseUrl);
   return (
     <AuthProvider client={config ? client : null} redirectTo={redirectTo}>
-      <AuthGate>{(user) => <CloudBootstrap key={user.id} user={user} repository={repository} cloudImport={cloudImport} />}</AuthGate>
+      <AuthGate>{(user) => <CloudBootstrap key={user.id} user={user} repository={repository} cloudImport={cloudImport} cloudAvatarClient={cloudAvatarClient} />}</AuthGate>
     </AuthProvider>
   );
 }

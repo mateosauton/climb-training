@@ -17,7 +17,7 @@ describe("user data export UI", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
     expect(await screen.findByText("Archivo sensible")).toBeInTheDocument();
     expect(screen.getByText(/Usuario activo:/)).toBeInTheDocument();
 

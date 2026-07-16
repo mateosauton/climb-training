@@ -38,7 +38,7 @@ describe("user data App integration", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
     const grade = await screen.findByLabelText("Grado actual");
     fireEvent.change(grade, { target: { value: "7c" } });
     await user.click(screen.getByRole("button", { name: "Guardar objetivos" }));
@@ -58,5 +58,19 @@ describe("user data App integration", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("datos locales v3 estan danados");
     expect(localStorage.getItem(USER_DATA_STORAGE_KEY)).toBe(corrupt);
+  });
+
+  it("shows athlete identity and opens Profile only from the avatar button", async () => {
+    localStorage.setItem("climb4w.state.v1", JSON.stringify({
+      ...defaultState,
+      profile: { ...defaultState.profile, name: "Mateo Sauton", questionnaireCompleted: true }
+    }));
+    render(<App />);
+
+    expect(await screen.findByText("Mateo Sauton")).toBeInTheDocument();
+    expect(screen.getByText(`${defaultState.goals.currentGrade} → ${defaultState.goals.targetGrade}`)).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Perfil" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Abrir perfil de Mateo Sauton" }));
+    expect(await screen.findByText("Perfil del escalador")).toBeInTheDocument();
   });
 });

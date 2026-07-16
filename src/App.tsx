@@ -49,7 +49,7 @@ import {
   AlertDialogTrigger
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -76,6 +76,8 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ProfilePhotoPicker } from "@/features/profile/ProfilePhotoPicker";
+import { createAvatarSignedUrl, uploadAvatar } from "@/features/cloud/cloud-avatar";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -261,6 +263,7 @@ const tabs = [
   { value: "video", label: "Video", icon: Film },
   { value: "profile", label: "Perfil", icon: UserRound }
 ];
+const primaryTabs = tabs.filter((tab) => tab.value !== "profile");
 
 function cloneData(value) {
   if (typeof structuredClone === "function") return structuredClone(value);
@@ -827,7 +830,7 @@ function createQuestionnaireFormData(draft) {
   return form;
 }
 
-function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle }) {
+function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState(() => ({ ...profile }));
   const currentSection = QUESTIONNAIRE_SECTIONS[stepIndex];
@@ -905,6 +908,13 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
               ))}
             </div>
             <form className="space-y-5" onSubmit={submitStep}>
+              {stepIndex === 0 ? (
+                <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
+                  <h3 className="mb-3 font-semibold">Foto de perfil</h3>
+                  <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={onAvatarFileChange} disabled={avatarSaving} />
+                </section>
+              ) : null}
+              {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
               <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold">{currentSection.title}</h3>
@@ -923,7 +933,7 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                 </div>
               </section>
               <div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={onSkip}>
+                <Button type="button" variant="outline" disabled={avatarSaving} onClick={onSkip}>
                   Completar mas tarde
                 </Button>
                 <Button
@@ -935,9 +945,9 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                   <ChevronLeft className="size-4" />
                   Atras
                 </Button>
-                <Button type="submit">
+                <Button type="submit" disabled={avatarSaving}>
                   {isLastStep ? <Save className="size-4" /> : <ChevronRight className="size-4" />}
-                  {isLastStep ? "Guardar cuestionario" : "Siguiente"}
+                  {avatarSaving ? "Guardando foto…" : isLastStep ? "Guardar cuestionario" : "Siguiente"}
                 </Button>
               </div>
             </form>
@@ -1027,6 +1037,8 @@ function TrainingSidebar({
   setActiveWeek,
   risk,
   goals,
+  profile,
+  avatarUrl,
   theme,
   onThemeToggle,
   accountEmail,
@@ -1035,6 +1047,8 @@ function TrainingSidebar({
   signingOut
 }) {
   const { setOpenMobile } = useSidebar();
+  const athleteName = profile.name || "Escalador";
+  const initials = athleteName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E";
 
   function goToTab(value) {
     setActiveTab(value);
@@ -1058,32 +1072,37 @@ function TrainingSidebar({
         <div className="flex items-center gap-2">
           <SidebarMenu className="min-w-0 flex-1">
             <SidebarMenuItem>
+              <div className="flex items-center gap-2 px-2 py-1">
+                <button type="button" className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" aria-label={`Abrir perfil de ${athleteName}`} onClick={() => goToTab("profile")}>
+                  <Avatar className="size-9">
+                    <AvatarImage src={avatarUrl || undefined} alt={`Foto de ${athleteName}`} />
+                    <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground">{initials}</AvatarFallback>
+                  </Avatar>
+                </button>
+                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                  <span className="truncate font-medium">{athleteName}</span>
+                  <span className="truncate text-xs text-sidebar-foreground/70">{goals.currentGrade} → {goals.targetGrade}</span>
+                </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <SidebarMenuButton
-                    size="lg"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
                     aria-label="Menu del bloque de escalada"
                     title="Menu del bloque de escalada"
-                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                    className="ml-auto size-8 shrink-0 data-[state=open]:bg-sidebar-accent"
                   >
-                    <Avatar className="size-8 rounded-lg">
-                      <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">MS</AvatarFallback>
-                    </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-medium">Climbing block</span>
-                      <span className="truncate text-xs text-sidebar-foreground/70">{goals.currentGrade} a {goals.targetGrade}</span>
-                    </div>
-                    <Dumbbell className="ml-auto size-4" />
-                  </SidebarMenuButton>
+                    <Dumbbell className="size-4" />
+                  </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="right" align="start" className="w-60">
                   <DropdownMenuLabel>Bloque actual</DropdownMenuLabel>
                   <DropdownMenuItem onClick={() => goToTab("plan")}>{goals.project}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => goToTab("video")}>{goals.focus}</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => goToTab("profile")}>Perfil del escalador</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              </div>
             </SidebarMenuItem>
           </SidebarMenu>
           <Button
@@ -1137,7 +1156,7 @@ function TrainingSidebar({
           <SidebarGroupLabel>Navegacion</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {tabs.map(({ value, label, icon: Icon }) => (
+              {primaryTabs.map(({ value, label, icon: Icon }) => (
                 <SidebarMenuItem key={value}>
                   <SidebarMenuButton
                     type="button"
@@ -1251,6 +1270,7 @@ export default function App({
   cloudImport = null,
   loadLegacyVideoBlob = getVideo,
   uploadLegacyVideo = null,
+  cloudAvatarClient = null,
   cloudVerified = false,
   cloudHydration = null
 }) {
@@ -1325,6 +1345,10 @@ export default function App({
   const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
   const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSaving, setAvatarSaving] = useState(false);
   const pendingQuestionnaire = useRef(null);
   const pendingFacts = useRef([]);
   const pendingLog = useRef(null);
@@ -1378,6 +1402,16 @@ export default function App({
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    const path = cloudHydration?.profile?.avatarPath;
+    if (!cloudAvatarClient || !path) return;
+    let current = true;
+    void createAvatarSignedUrl(cloudAvatarClient, path).then((url) => {
+      if (current) setAvatarUrl(url);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [cloudAvatarClient, cloudHydration?.profile?.avatarPath]);
 
   useEffect(() => {
     return () => {
@@ -1622,6 +1656,28 @@ export default function App({
     }
   }
 
+  async function saveAvatar() {
+    if (!avatarFile) return true;
+    if (!cloudAvatarClient || !cloudRepository) {
+      setAvatarError("No pudimos guardar tu foto de perfil. Intentá nuevamente.");
+      return false;
+    }
+    setAvatarSaving(true);
+    setAvatarError("");
+    try {
+      const path = await uploadAvatar(cloudAvatarClient, authUser.id, avatarFile);
+      await cloudRepository.saveAvatarPath(path);
+      setAvatarUrl(await createAvatarSignedUrl(cloudAvatarClient, path));
+      setAvatarFile(null);
+      return true;
+    } catch {
+      setAvatarError("No pudimos guardar tu foto de perfil. Intentá nuevamente.");
+      return false;
+    } finally {
+      setAvatarSaving(false);
+    }
+  }
+
   async function saveGuidedToCloud(state) {
     if (!cloudRepository) return;
     const pending = pendingGuided.current || { state, idempotencyKey: makeId() };
@@ -1671,9 +1727,10 @@ export default function App({
     void appendFactsToCloud(appended);
   }
 
-  function saveQuestionnaire(payload) {
+  async function saveQuestionnaire(payload) {
     if (payload?.preventDefault) payload.preventDefault();
     const form = payload instanceof FormData ? payload : new FormData(payload.currentTarget);
+    if (!(await saveAvatar())) return;
     const now = new Date().toISOString();
     const nextProfile = buildProfileFromQuestionnaireForm(form, questionnaireProfile);
     const values = {
@@ -1702,7 +1759,8 @@ export default function App({
     }
   }
 
-  function skipQuestionnaire() {
+  async function skipQuestionnaire() {
+    if (!(await saveAvatar())) return;
     const now = new Date().toISOString();
     const values = {
       questionnaireCompleted: true,
@@ -1999,6 +2057,8 @@ export default function App({
               setActiveWeek={setActiveWeek}
               risk={risk}
               goals={state.goals}
+              profile={state.profile}
+              avatarUrl={avatarUrl}
               theme={theme}
               onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               accountEmail={authUser.email}
@@ -2923,6 +2983,12 @@ export default function App({
 
                 <form key={state.profile.questionnaireCompletedAt || "profile-form"} className="space-y-5" onSubmit={saveProfile}>
                   <section className="space-y-3">
+                    <h3 className="font-semibold">Foto de perfil</h3>
+                    <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={setAvatarFile} disabled={avatarSaving} />
+                    {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
+                    {avatarFile ? <Button type="button" variant="outline" disabled={avatarSaving} onClick={() => void saveAvatar()}>{avatarSaving ? "Guardando foto…" : "Guardar foto"}</Button> : null}
+                  </section>
+                  <section className="space-y-3">
                     <div>
                       <h3 className="font-semibold">Objetivos del bloque</h3>
                       <p className="mt-1 text-sm text-muted-foreground">Lo que queres lograr y el foco tecnico que debe guiar las sesiones.</p>
@@ -3128,8 +3194,8 @@ export default function App({
         </TabsContent>
               </div>
 
-              <TabsList className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 grid w-auto grid-cols-5 rounded-xl border border-border bg-card/95 p-1 shadow-2xl group-data-horizontal/tabs:h-16 supports-[backdrop-filter]:backdrop-blur md:hidden">
-                {tabs.map(({ value, label, icon: Icon }) => (
+              <TabsList className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 grid w-auto grid-cols-4 rounded-xl border border-border bg-card/95 p-1 shadow-2xl group-data-horizontal/tabs:h-16 supports-[backdrop-filter]:backdrop-blur md:hidden">
+                {primaryTabs.map(({ value, label, icon: Icon }) => (
                   <TabsTrigger
                     key={value}
                     value={value}
@@ -3150,6 +3216,11 @@ export default function App({
             completion={questionnaireCompletion}
             onSubmit={saveQuestionnaire}
             onSkip={skipQuestionnaire}
+            avatarFile={avatarFile}
+            onAvatarFileChange={setAvatarFile}
+            avatarUrl={avatarUrl}
+            avatarError={avatarError}
+            avatarSaving={avatarSaving}
             theme={theme}
             onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           />

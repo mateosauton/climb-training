@@ -26,9 +26,7 @@ async function seedLegacy(page: Page) {
 }
 
 async function openProfile(page: Page) {
-  const tab = page.getByRole("tab", { name: "Perfil" });
-  if (await tab.isVisible().catch(() => false)) await tab.click();
-  else await page.getByRole("button", { name: "Perfil" }).click();
+  await page.getByRole("button", { name: /Abrir perfil de/ }).click();
   await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
 }
 

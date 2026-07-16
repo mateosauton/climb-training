@@ -149,6 +149,36 @@ describe("cloud-primary app integration", () => {
     expect(submitted).toMatchObject({ version: 2, idempotencyKey: expect.any(String) });
   });
 
+  it("uploads and saves the avatar before closing onboarding, and stays open on failure", async () => {
+    const saveAvatarPath = vi.fn(async () => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), saveAvatarPath };
+    let finishUpload: ((value: { data: unknown; error: null }) => void) | undefined;
+    const upload = vi.fn(() => new Promise<{ data: unknown; error: null }>((resolve) => { finishUpload = resolve; }));
+    const cloudAvatarClient = { storage: { from: vi.fn(() => ({
+      upload,
+      createSignedUrl: vi.fn(async () => ({ data: { signedUrl: "https://signed.test/avatar" }, error: null }))
+    })) } };
+    const first = render(<App cloudRepository={cloud} cloudAvatarClient={cloudAvatarClient} />);
+
+    await userEvent.upload(screen.getByLabelText("Foto de perfil"), new File(["avatar"], "avatar.png", { type: "image/png" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: /^6\./ }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Guardar cuestionario" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    finishUpload?.({ data: {}, error: null });
+    await waitFor(() => expect(saveAvatarPath).toHaveBeenCalledWith("test-user/avatar.png"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    first.unmount();
+    localStorage.clear();
+    const failingClient = { storage: { from: () => ({ upload: async () => ({ data: null, error: new Error("offline") }), createSignedUrl: vi.fn() }) } };
+    render(<App cloudRepository={cloud} cloudAvatarClient={failingClient} />);
+    await userEvent.upload(screen.getByLabelText("Foto de perfil"), new File(["avatar"], "avatar.png", { type: "image/png" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: /^6\./ }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Guardar cuestionario" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos guardar tu foto");
+    expect(screen.getAllByRole("dialog").at(-1)).toBeInTheDocument();
+  });
+
   it("hydrates facts and activity from cloud state instead of local recovery on reload", async () => {
     localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify({ invalid: "recovery must not win" }));
     const hydrate = vi.fn(async () => ({
@@ -161,8 +191,8 @@ describe("cloud-primary app integration", () => {
     }));
     const cloud = { ...repository(vi.fn(async () => undefined)), hydrate };
     render(<App cloudRepository={cloud} cloudVerified cloudHydration={await hydrate()} />);
-    await userEvent.setup().click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
-    expect(await screen.findByText("Cloud Mateo")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Abrir perfil de Cloud Mateo" }));
+    expect((await screen.findAllByText("Cloud Mateo")).length).toBeGreaterThan(1);
   });
 
   it("sends profile facts and logs to cloud with stable retry keys", async () => {
@@ -172,7 +202,7 @@ describe("cloud-primary app integration", () => {
     const cloud = { ...repository(vi.fn(async () => undefined)), appendFacts, appendSessionLog };
     localStorage.setItem("climb4w.state.v1", JSON.stringify({ ...defaultState, profile: { ...defaultState.profile, questionnaireCompleted: true } }));
     render(<App cloudRepository={cloud} />);
-    await user.click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
     fireEvent.change(await screen.findByLabelText("Grado actual"), { target: { value: "7c" } });
     await user.click(screen.getByRole("button", { name: "Guardar objetivos" }));
     await waitFor(() => expect(appendFacts).toHaveBeenCalled());
