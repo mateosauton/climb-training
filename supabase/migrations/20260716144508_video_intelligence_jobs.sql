@@ -366,6 +366,28 @@ begin
   returning * into v_job;
 
   if v_job.id is null then
+    select * into v_job
+    from private.video_analysis_jobs
+    where id = (v_message.message->>'job_id')::uuid
+      and state = 'processing'
+      and attempt_count >= max_attempts
+    for update;
+    if v_job.id is not null then
+      update private.video_analysis_jobs
+      set state = 'failed', stage = 'failed', progress = 100,
+          safe_error = jsonb_build_object('code', 'attempts_exhausted'),
+          completed_at = now(), updated_at = now()
+      where id = v_job.id;
+      update public.video_analysis_status
+      set state = 'failed', stage = 'failed', progress = 100,
+          safe_error = jsonb_build_object('code', 'attempts_exhausted'), updated_at = now()
+      where job_id = v_job.id;
+      update public.video_assets
+      set processing_status = 'failed',
+          sanitized_failure = jsonb_build_object('code', 'attempts_exhausted'),
+          updated_at = now()
+      where id = v_job.video_asset_id and athlete_id = v_job.athlete_id;
+    end if;
     perform pgmq.archive('video_analysis', v_message.msg_id);
     return null;
   end if;
@@ -398,6 +420,8 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_job private.video_analysis_jobs;
 begin
   if char_length(coalesce(p_stage, '')) = 0
     or p_progress not between 1 and 99
@@ -405,13 +429,36 @@ begin
     raise exception 'invalid checkpoint' using errcode = '22023';
   end if;
 
+  select * into v_job from private.video_analysis_jobs
+  where id = p_job_id and state = 'processing'
+  for update;
+  if v_job.id is null then
+    raise exception 'active video analysis job not found' using errcode = 'P0002';
+  end if;
+
+  if p_stage = 'failed' and v_job.attempt_count >= v_job.max_attempts then
+    update private.video_analysis_jobs
+    set state = 'failed', stage = 'failed', progress = 100,
+        checkpoints = checkpoints || p_checkpoint, safe_error = p_checkpoint,
+        completed_at = now(), updated_at = now()
+    where id = p_job_id;
+    update public.video_analysis_status
+    set state = 'failed', stage = 'failed', progress = 100,
+        safe_error = p_checkpoint, updated_at = now()
+    where job_id = p_job_id;
+    update public.video_assets
+    set processing_status = 'failed', sanitized_failure = p_checkpoint, updated_at = now()
+    where id = v_job.video_asset_id and athlete_id = v_job.athlete_id;
+    if v_job.queue_message_id is not null then
+      perform pgmq.archive('video_analysis', v_job.queue_message_id);
+    end if;
+    return;
+  end if;
+
   update private.video_analysis_jobs
   set stage = p_stage, progress = greatest(progress, p_progress),
       checkpoints = checkpoints || p_checkpoint, updated_at = now()
-  where id = p_job_id and state = 'processing';
-  if not found then
-    raise exception 'active video analysis job not found' using errcode = 'P0002';
-  end if;
+  where id = p_job_id;
 
   update public.video_analysis_status
   set state = 'processing', stage = p_stage, progress = greatest(progress, p_progress),

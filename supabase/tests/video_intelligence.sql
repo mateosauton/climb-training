@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(15);
+select plan(18);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -112,6 +112,32 @@ select ok(
   and has_table_privilege('authenticated', 'public.video_recommendation_feedback', 'INSERT')
   and not has_table_privilege('authenticated', 'public.video_recommendation_feedback', 'UPDATE'),
   'feedback is append-only for athletes'
+);
+
+update private.video_analysis_jobs
+set state = 'processing', attempt_count = max_attempts
+where athlete_id = '00000000-0000-0000-0000-000000000701';
+
+select lives_ok(
+  $$select public.checkpoint_video_analysis_job(
+    (select job_id from public.video_analysis_status where athlete_id = '00000000-0000-0000-0000-000000000701'),
+    'failed', 99, '{"code":"processing_failed","retryable":false}'::jsonb
+  )$$,
+  'the final failed attempt transitions cleanly'
+);
+
+select is(
+  (select state || ':' || progress from public.video_analysis_status
+    where athlete_id = '00000000-0000-0000-0000-000000000701'),
+  'failed:100',
+  'final retry failure is terminal for realtime status'
+);
+
+select is(
+  (select processing_status from public.video_assets
+    where id = '00000000-0000-0000-0000-000000000711'),
+  'failed',
+  'final retry failure is terminal for the video asset'
 );
 
 select * from finish();
