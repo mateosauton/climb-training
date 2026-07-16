@@ -128,7 +128,9 @@ import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import { readAuthConfig } from "@/features/auth/auth-config";
 import { createCloudClient } from "@/features/cloud/cloud-client";
-import { createCloudVideoService } from "@/features/cloud/cloud-video";
+import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
+import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
 import { loadVideoIntelligenceHistory } from "@/features/cloud/video-history";
 import {
   defaultState,

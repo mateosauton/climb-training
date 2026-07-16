@@ -54,6 +54,7 @@ describe("cloud-primary app integration", () => {
 
     expect(await screen.findByText("Preparando tus datos en la nube…")).toBeInTheDocument();
     expect(screen.queryByText("mateo@example.com")).not.toBeInTheDocument();
+    await waitFor(() => expect(ensureProfile).toHaveBeenCalledTimes(1));
     resolveProfile?.();
     expect(await screen.findByText("mateo@example.com")).toBeInTheDocument();
     expect(ensureProfile).toHaveBeenCalledTimes(1);
