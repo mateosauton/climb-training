@@ -125,6 +125,13 @@ import { migrateLegacyUserData } from "@/features/user-data/user-data-migration"
 import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
+import { createCloudClient } from "@/features/cloud/cloud-client";
+import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
+import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
+import type { CloudRepository } from "@/features/cloud/cloud-repository";
+import type { CloudImport } from "@/features/cloud/cloud-import";
+import { readAuthConfig } from "@/features/auth/auth-config";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import { readAuthConfig } from "@/features/auth/auth-config";
 import { createCloudClient } from "@/features/cloud/cloud-client";
