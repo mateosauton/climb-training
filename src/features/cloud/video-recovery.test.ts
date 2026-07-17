@@ -21,37 +21,30 @@ const video = {
 };
 
 describe("reconcileUploadedVideoRecovery", () => {
-  it("appends the immutable analysis before completing a reload that crashed after upload", async () => {
+  it("requests an idempotent job before completing a reload that crashed after upload", async () => {
     const order: string[] = [];
-    const appendAnalysis = vi.fn(async () => { order.push("analysis"); });
+    const requestAnalysis = vi.fn(async () => { order.push("request"); return "job-1"; });
     const persistUploaded = vi.fn(() => { order.push("persist"); return true; });
     const deleteBlob = vi.fn(async () => { order.push("delete"); });
 
     await expect(reconcileUploadedVideoRecovery(video, {
       reconciledUpload: vi.fn(async () => ({ videoId: "video-1", path: "athlete-1/video-1/original.mp4" })),
-      appendAnalysis,
+      requestAnalysis,
       persistUploaded,
       deleteBlob
     })).resolves.toBe(true);
 
-    expect(appendAnalysis).toHaveBeenCalledWith("video-1", {
-      status: "completed",
-      metrics: {
-        session_id: "w1d1", notes: "right foot cuts", foot_cuts: 2, swing: 1,
-        hips: 3, shoulder: 0, breath: 1, reading: 2
-      },
-      advice: { recommendations: [{ title: "Feet", body: "Stay active." }] }
-    });
-    expect(order).toEqual(["analysis", "persist", "delete"]);
+    expect(requestAnalysis).toHaveBeenCalledWith("video-1", "video-1:first-analysis");
+    expect(order).toEqual(["request", "persist", "delete"]);
   });
 
-  it("keeps the recovery blob when appending the analysis fails", async () => {
+  it("keeps the recovery blob when requesting the analysis fails", async () => {
     const persistUploaded = vi.fn(() => true);
     const deleteBlob = vi.fn();
 
     await expect(reconcileUploadedVideoRecovery(video, {
       reconciledUpload: async () => ({ videoId: "video-1", path: "athlete-1/video-1/original.mp4" }),
-      appendAnalysis: async () => { throw new Error("offline"); },
+      requestAnalysis: async () => { throw new Error("offline"); },
       persistUploaded,
       deleteBlob
     })).rejects.toThrow("offline");

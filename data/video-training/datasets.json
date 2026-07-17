@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "purpose": "Commercial climbing-video evaluation and explicitly approved model training",
+    "requiredLicensePermissions": [
+      "download",
+      "commercial-use",
+      "derivatives",
+      "model-training"
+    ],
+    "prohibitedSources": [
+      "standard-license social media",
+      "competition broadcasts without written permission",
+      "gym footage without releases",
+      "unknown-license footage"
+    ]
+  },
+  "datasets": [
+    {
+      "id": "the-way-up-zenodo-15196867",
+      "title": "The Way Up: A Dataset for Hold Usage Detection in Sport Climbing",
+      "status": "registered",
+      "eligibleForCommercialTraining": true,
+      "source": {
+        "url": "https://zenodo.org/records/15196867",
+        "metadataUrl": "https://zenodo.org/api/records/15196867",
+        "paperUrl": "https://openaccess.thecvf.com/content/CVPR2025W/CVSPORTS/html/Maschek_The_Way_Up_A_Dataset_for_Hold_Usage_Detection_in_CVPRW_2025_paper.html",
+        "doi": "10.5281/zenodo.15196867",
+        "conceptDoi": "10.5281/zenodo.15196866",
+        "publisher": "Zenodo",
+        "creators": [
+          {
+            "name": "Maschek, Anna",
+            "affiliation": "University of Applied Sciences Upper Austria"
+          },
+          {
+            "name": "Schedl, David",
+            "affiliation": "University of Applied Sciences Upper Austria",
+            "orcid": "0000-0002-7621-3526"
+          }
+        ],
+        "retrievedAt": "2026-07-16"
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "name": "Creative Commons Attribution 4.0 International",
+        "url": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "permissions": {
+        "download": true,
+        "commercialUse": true,
+        "derivatives": true,
+        "modelTraining": true,
+        "conditions": [
+          "Give appropriate credit",
+          "Link to the CC BY 4.0 license",
+          "Indicate transformations or other changes"
+        ]
+      },
+      "artifact": {
+        "fileName": "dataset.zip",
+        "downloadUrl": "https://zenodo.org/api/records/15196867/files/dataset.zip/content",
+        "sizeBytes": 20889661515,
+        "checksum": {
+          "algorithm": "md5",
+          "value": "a46cbca826a7f28ab591a4900ce5a1c9",
+          "source": "Zenodo record metadata"
+        },
+        "committedToRepository": false
+      },
+      "contents": {
+        "videoCount": 22,
+        "participantCount": 10,
+        "routeCount": 2,
+        "annotatedHoldUsages": 940
+      },
+      "splitPolicy": {
+        "status": "approved-for-hold-contact-training",
+        "groupKeys": [
+          "participantId"
+        ],
+        "stratifyBy": [
+          "routeId"
+        ],
+        "identityNormalization": "Treat p2a and p2b as participant p2 so repeated recordings never cross splits.",
+        "rule": "Assign participant groups before extracting frames; no participant may cross train, validation, or test splits. Balance both routes within every split.",
+        "defaultUse": "evaluation",
+        "vlmTraining": "disabled-until-coach-review",
+        "poseHoldContactTraining": "allowed-after-privacy-review"
+      },
+      "attribution": {
+        "required": true,
+        "text": "The Way Up: A Dataset for Hold Usage Detection in Sport Climbing, Anna Maschek and David C. Schedl, CC BY 4.0, https://doi.org/10.5281/zenodo.15196867",
+        "includeIn": [
+          "dataset manifests",
+          "model cards",
+          "evaluation reports"
+        ],
+        "recordTransformations": true
+      },
+      "privacy": {
+        "personData": true,
+        "biometricRisk": "pose and movement data may identify or profile participants",
+        "consentReview": {
+          "status": "documented-by-publisher",
+          "reviewedAt": "2026-07-16",
+          "evidence": "The accompanying paper states that all participants provided informed consent for filming and dataset publication.",
+          "limitation": "Publication consent is not treated as blanket consent for biometric identification or individual profiling. Do not identify participants."
+        },
+        "nonParticipantFaces": "Publisher reports that faces of non-participating individuals were blurred.",
+        "requiredBeforeTraining": "Reconfirm the release contents match the paper, minimize person data, and document the intended model-training purpose."
+      },
+      "takedown": {
+        "state": "active",
+        "checkedAt": "2026-07-16",
+        "sourceRecord": "https://zenodo.org/records/15196867",
+        "onNotice": "Quarantine affected assets, stop new training jobs, record the notice, and rebuild affected dataset versions."
+      }
+    }
+  ],
+  "excludedSources": [
+    {
+      "id": "ascendmotion",
+      "url": "https://www.lidarhumanmotion.net/data-ascendmotion/",
+      "eligibleForCommercialTraining": false,
+      "permissions": {
+        "modelTraining": false
+      },
+      "reason": "The academic download flow directs commercial users to obtain a separate commercial license."
+    },
+    {
+      "id": "cimi4d",
+      "url": "http://www.lidarhumanmotion.net/cimi4d/",
+      "eligibleForCommercialTraining": false,
+      "permissions": {
+        "modelTraining": false
+      },
+      "reason": "The documented participant permission is for scientific purposes; commercial training rights are not established."
+    },
+    {
+      "id": "youtube-standard-license",
+      "url": "https://support.google.com/youtube/answer/2797468",
+      "eligibleForCommercialTraining": false,
+      "permissions": {
+        "modelTraining": false
+      },
+      "reason": "Public viewing and YouTube's standard license do not grant commercial model-training rights."
+    },
+    {
+      "id": "unknown-license-footage",
+      "url": null,
+      "eligibleForCommercialTraining": false,
+      "permissions": {
+        "modelTraining": false
+      },
+      "reason": "Items without verifiable commercial, derivative, and model-training rights remain metadata-only."
+    }
+  ],
+  "athleteUploads": {
+    "trainingDefault": "excluded",
+    "analysisConsentIsTrainingConsent": false,
+    "requiresSeparateExplicitOptIn": true,
+    "withdrawalAction": "Remove future dataset versions and rebuild affected trainable artifacts when required."
+  }
+}
