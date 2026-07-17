@@ -75,4 +75,11 @@ describe("ProfilePhotoPicker", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("JPEG, PNG o WebP");
     expect(onFileChange).not.toHaveBeenCalled();
   });
+
+  it("offers photo removal when a stored photo exists", async () => {
+    const onRemove = vi.fn();
+    render(<ProfilePhotoPicker file={null} currentUrl="https://example.com/avatar.webp" onFileChange={() => undefined} onRemove={onRemove} />);
+    await userEvent.click(screen.getByRole("button", { name: "Eliminar foto" }));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
 });

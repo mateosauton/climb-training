@@ -6,11 +6,12 @@ import { validateAvatarFile, type AvatarFile } from "@/features/cloud/cloud-avat
 type ProfilePhotoPickerProps = {
   file: AvatarFile | null;
   onFileChange: (file: AvatarFile) => void;
+  onRemove?: () => void;
   currentUrl?: string | null;
   disabled?: boolean;
 };
 
-export function ProfilePhotoPicker({ file, onFileChange, currentUrl = null, disabled = false }: ProfilePhotoPickerProps) {
+export function ProfilePhotoPicker({ file, onFileChange, onRemove, currentUrl = null, disabled = false }: ProfilePhotoPickerProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(currentUrl);
@@ -50,9 +51,16 @@ export function ProfilePhotoPicker({ file, onFileChange, currentUrl = null, disa
         ) : (
           <div aria-hidden="true" className="size-20 rounded-full border bg-muted" />
         )}
-        <Button type="button" variant="outline" disabled={disabled} onClick={() => inputRef.current?.click()}>
-          {previewUrl ? "Reemplazar foto" : "Elegir foto"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" disabled={disabled} onClick={() => inputRef.current?.click()}>
+            {previewUrl ? "Reemplazar foto" : "Elegir foto"}
+          </Button>
+          {previewUrl && onRemove ? (
+            <Button type="button" variant="ghost" disabled={disabled} onClick={onRemove}>
+              Eliminar foto
+            </Button>
+          ) : null}
+        </div>
       </div>
       <input
         id={inputId}
