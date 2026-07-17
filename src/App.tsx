@@ -830,7 +830,7 @@ function createQuestionnaireFormData(draft) {
   return form;
 }
 
-function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving }) {
+function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState(() => ({ ...profile }));
   const currentSection = QUESTIONNAIRE_SECTIONS[stepIndex];
@@ -911,7 +911,7 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
               {stepIndex === 0 ? (
                 <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
                   <h3 className="mb-3 font-semibold">Foto de perfil</h3>
-                  <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={onAvatarFileChange} disabled={avatarSaving} />
+                  <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={onAvatarFileChange} disabled={avatarSaving || !avatarStorageAvailable} />
                 </section>
               ) : null}
               {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
@@ -1348,6 +1348,7 @@ export default function App({
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [avatarPath, setAvatarPath] = useState(cloudHydration?.profile?.avatarPath || null);
+  const [avatarRevision, setAvatarRevision] = useState(0);
   const avatarPathRef = useRef(avatarPath);
   const [avatarError, setAvatarError] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
@@ -1438,7 +1439,7 @@ export default function App({
       current = false;
       clearTimeout(timer);
     };
-  }, [cloudAvatarClient, avatarPath]);
+  }, [cloudAvatarClient, avatarPath, avatarRevision]);
 
   useEffect(() => {
     return () => {
@@ -1686,8 +1687,8 @@ export default function App({
   async function saveAvatar() {
     if (!avatarFile) return true;
     if (!cloudAvatarClient || !cloudRepository) {
-      setAvatarError("No pudimos guardar tu foto de perfil. Intentá nuevamente.");
-      return false;
+      setAvatarFile(null);
+      return true;
     }
     setAvatarSaving(true);
     setAvatarError("");
@@ -1697,6 +1698,7 @@ export default function App({
       await cloudRepository.saveAvatarPath(path);
       avatarPathRef.current = path;
       setAvatarPath(path);
+      setAvatarRevision((current) => current + 1);
       if (previousPath && previousPath !== path) {
         await removeAvatar(cloudAvatarClient, previousPath).catch(() => undefined);
       }
@@ -3021,7 +3023,7 @@ export default function App({
                 <form key={state.profile.questionnaireCompletedAt || "profile-form"} className="space-y-5" onSubmit={saveProfile}>
                   <section className="space-y-3">
                     <h3 className="font-semibold">Foto de perfil</h3>
-                    <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={handleAvatarFileChange} disabled={avatarSaving} />
+                    <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={handleAvatarFileChange} disabled={avatarSaving || !cloudAvatarClient || !cloudRepository} />
                     {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
                     {avatarFile ? <Button type="button" variant="outline" disabled={avatarSaving} onClick={() => void saveAvatar()}>{avatarSaving ? "Guardando foto…" : "Guardar foto"}</Button> : null}
                   </section>
@@ -3258,6 +3260,7 @@ export default function App({
             avatarUrl={avatarUrl}
             avatarError={avatarError}
             avatarSaving={avatarSaving}
+            avatarStorageAvailable={Boolean(cloudAvatarClient && cloudRepository)}
             theme={theme}
             onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           />
