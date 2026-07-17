@@ -31,6 +31,7 @@ test("sign-out returns to the email gate", async ({ page }) => {
   const skipQuestionnaire = page.getByRole("button", { name: "Completar mas tarde" });
   if (await skipQuestionnaire.isVisible().catch(() => false)) await skipQuestionnaire.click();
   await openProfile(page);
+  await page.getByRole("tab", { name: "Cuenta" }).click();
   await page.getByRole("button", { name: "Cerrar sesión" }).last().click();
   await expect(page.getByRole("button", { name: "Iniciar sesión" })).toBeVisible();
 });

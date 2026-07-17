@@ -64,11 +64,12 @@ test("profile history and export controls remain usable without leaking data", a
   await page.goto("./");
   await openProfile(page);
 
+  await page.getByRole("tab", { name: "Escalada" }).click();
   for (const value of ["7a", "7b"]) {
     await page.getByLabel("Grado actual").fill(value);
-    await page.getByRole("button", { name: "Guardar objetivos" }).click();
+    await page.getByRole("button", { name: "Guardar cambios" }).click();
   }
-  await page.getByRole("button", { name: "Ver JSON" }).click();
+  await page.getByRole("tab", { name: "Cuenta" }).click();
   const exported = JSON.parse(await page.getByLabel("JSON exportado del tracker").inputValue());
   const chain = exported.users[exported.activeUserId].facts.filter((fact: { key: string }) => fact.key === "currentGrade");
   expect(chain.map((fact: { value: string }) => fact.value)).toEqual(["6c", "7a", "7b"]);
@@ -77,7 +78,7 @@ test("profile history and export controls remain usable without leaking data", a
   expect(exported).not.toHaveProperty("plan");
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
-  for (const name of ["Copiar JSON", "Descargar", "Ocultar JSON"]) {
+  for (const name of ["Copiar JSON", "Descargar", "Borrar datos locales"]) {
     await expect(page.getByRole("button", { name })).toBeInViewport();
   }
   expect(leakedRequests).toEqual([]);
