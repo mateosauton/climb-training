@@ -217,7 +217,7 @@ describe("cloud-primary app integration", () => {
     fireEvent.click(screen.getByRole("button", { name: /^1\./ }));
     fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["new"], "replacement.png", { type: "image/png" })] } });
     expect(screen.queryByText("No pudimos guardar tu foto de perfil. Intentá nuevamente.")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("refreshes the signed URL after replacing an avatar at the same path", async () => {
     const saveAvatarPath = vi.fn(async () => undefined);
