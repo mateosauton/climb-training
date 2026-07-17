@@ -44,10 +44,10 @@ describe("profile summary", () => {
 
   it("uses the athlete local calendar at the Sunday-to-Monday boundary", () => {
     const logs = [
-      log("2026-07-19T23:30:00-03:00"),
-      log("2026-07-20T00:15:00-03:00")
+      log(new Date(2026, 6, 19, 23, 30).toISOString()),
+      log(new Date(2026, 6, 20, 0, 15).toISOString())
     ];
-    const monday = new Date("2026-07-20T00:30:00-03:00");
+    const monday = new Date(2026, 6, 20, 0, 30);
     expect(calculateCurrentWeekSessions(logs, monday)).toBe(1);
     expect(calculateWeeklyStreak(logs, monday)).toBe(2);
   });
