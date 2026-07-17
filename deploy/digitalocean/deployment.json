@@ -7,13 +7,15 @@
   "firewall_id": "abc7cf72-5992-48b7-ac7e-f8baa6e165e1",
   "git_revision": "fdad2c0",
   "deployed_at": "2026-07-16T20:13:04Z",
+  "destroyed_at": "2026-07-17T13:49:22Z",
+  "deployment_state": "destroyed",
   "observed_price_usd_per_hour": 1.57,
   "model": "Qwen/Qwen3-VL-8B-Instruct",
   "model_runtime": "vllm/vllm-openai:v0.14.1",
-  "model_state": "healthy",
-  "worker_image_state": "built",
+  "model_state": "destroyed_with_droplet",
+  "worker_image_state": "destroyed_with_droplet",
   "training_dataset": "the-way-up-zenodo-15196867",
   "training_dataset_state": "downloaded_checksum_verified_and_standard_videos_extracted",
   "contact_transition_prior_state": "trained_but_rejected_by_validation_quality_gate",
-  "worker_queue_state": "awaiting_supabase_service_role_key"
+  "worker_queue_state": "offline"
 }
