@@ -1040,8 +1040,6 @@ function TrainingSidebar({
   goals,
   profile,
   avatarUrl,
-  theme,
-  onThemeToggle,
   accountEmail,
   onSignOut,
   authError,
@@ -1219,8 +1217,6 @@ function TrainingSidebar({
 
       <SidebarFooter>
         <div className="mx-2 mb-2 hidden space-y-3 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3 text-sm md:block group-data-[collapsible=icon]:hidden">
-          <ThemeToggle theme={theme} onToggle={onThemeToggle} />
-          <Separator />
           <div className="flex items-center justify-between gap-2">
             <span className="text-sidebar-foreground/70">Sesiones</span>
             <Badge variant="outline">{metrics.completed}/28</Badge>
@@ -2124,8 +2120,6 @@ export default function App({
               goals={state.goals}
               profile={state.profile}
               avatarUrl={avatarUrl}
-              theme={theme}
-              onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               accountEmail={authUser.email}
               onSignOut={onSignOut}
               authError={authError}
