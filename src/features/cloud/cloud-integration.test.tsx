@@ -40,7 +40,10 @@ function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepos
 }
 
 describe("cloud-primary app integration", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
 
   it("refreshes an avatar signed URL before expiry and retries transient signing failures", async () => {
     vi.useFakeTimers();
@@ -332,6 +335,30 @@ describe("cloud-primary app integration", () => {
     await waitFor(() => expect(appendFacts).toHaveBeenCalled());
     await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
     await user.click(screen.getByRole("button", { name: "Guardar log" }));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
+  });
+
+  it("still sends logs to cloud when local recovery cannot be verified", async () => {
+    const user = userEvent.setup();
+    const appendSessionLog = vi.fn(async () => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    const originalGetItem = Storage.prototype.getItem;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (key) {
+      if (key === "climb4w.users.v3") return null;
+      return originalGetItem.call(this, key);
+    });
+
+    render(<App cloudRepository={cloud} cloudVerified cloudHydration={{
+      facts: [],
+      sessionLogs: [],
+      guided: { schemaVersion: 1, activeRun: null, history: [] },
+      activePlan: null,
+      profile: { avatarPath: null }
+    }} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
     await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
 

@@ -1040,8 +1040,6 @@ function TrainingSidebar({
   goals,
   profile,
   avatarUrl,
-  theme,
-  onThemeToggle,
   accountEmail,
   onSignOut,
   authError,
@@ -1219,8 +1217,6 @@ function TrainingSidebar({
 
       <SidebarFooter>
         <div className="mx-2 mb-2 hidden space-y-3 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3 text-sm md:block group-data-[collapsible=icon]:hidden">
-          <ThemeToggle theme={theme} onToggle={onThemeToggle} />
-          <Separator />
           <div className="flex items-center justify-between gap-2">
             <span className="text-sidebar-foreground/70">Sesiones</span>
             <Badge variant="outline">{metrics.completed}/28</Badge>
@@ -1634,7 +1630,7 @@ export default function App({
     const result = persistRecoveryBeforeCloudEffect(localStorage, next);
     if (!result.ok) {
       setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
-      return false;
+      if (!cloudVerified) return false;
     }
     userDataRef.current = next;
     setUserData(next);
@@ -1883,7 +1879,7 @@ export default function App({
     setLogForm((current) => ({ ...current, [field]: value }));
   }
 
-  function submitLog(event) {
+  async function submitLog(event) {
     event.preventDefault();
     const values = {};
     for (const field of logNumberFields) {
@@ -1902,15 +1898,34 @@ export default function App({
       notes: logForm.notes,
       ...values
     };
-    if (!persistActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }))) return;
-    if (cloudRepository) {
-      const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
-      pendingLog.current = submission;
-      void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
-        setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
-      });
+    const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
+    const current = userDataRef.current;
+    const userId = current.activeUserId;
+    const nextUser = { ...current.users[userId], sessionLogs: [...current.users[userId].sessionLogs, log] };
+    const next = { ...current, users: { ...current.users, [userId]: nextUser } };
+    const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+    if (!recovery.ok) {
+      setUserDataWarning(`No pudimos guardar los datos locales: ${recovery.error}`);
+      if (!cloudRepository) return;
+      try {
+        await cloudRepository.appendSessionLog(submission);
+      } catch {
+        setLogError("No pudimos guardar el log. Reintentá en unos segundos.");
+        return;
+      }
     }
-    updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
+    userDataRef.current = next;
+    setUserData(next);
+    if (cloudRepository) {
+      pendingLog.current = submission;
+      if (recovery.ok) {
+        void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
+          setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
+        });
+      } else {
+        pendingLog.current = null;
+      }
+    }
     setSavedRecommendation({
       log,
       session: selectedSession,
@@ -2124,8 +2139,6 @@ export default function App({
               goals={state.goals}
               profile={state.profile}
               avatarUrl={avatarUrl}
-              theme={theme}
-              onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               accountEmail={authUser.email}
               onSignOut={onSignOut}
               authError={authError}
