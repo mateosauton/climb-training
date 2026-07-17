@@ -29,6 +29,7 @@ createRoot(document.getElementById("root")!).render(
       baseUrl={import.meta.env.BASE_URL}
       repository={cloudRepository}
       cloudImport={cloudImport}
+      cloudAvatarClient={cloudClient}
     />
   </StrictMode>
 );

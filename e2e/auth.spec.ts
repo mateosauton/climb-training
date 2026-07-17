@@ -1,4 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function openProfile(page: Page) {
+  const profileButton = page.getByRole("button", { name: /Abrir perfil de/ });
+  if ((page.viewportSize()?.width || 0) < 768) {
+    await page.getByRole("button", { name: "Toggle Sidebar" }).first().click();
+  }
+  await expect(profileButton).toBeInViewport();
+  await profileButton.click();
+  await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
+}
 
 test("authenticated Supabase user keeps one local record across reload", async ({ page }) => {
   await page.goto("./");
@@ -20,9 +30,8 @@ test("sign-out returns to the email gate", async ({ page }) => {
   await page.goto("./");
   const skipQuestionnaire = page.getByRole("button", { name: "Completar mas tarde" });
   if (await skipQuestionnaire.isVisible().catch(() => false)) await skipQuestionnaire.click();
-  const mobileTab = page.getByRole("tab", { name: "Perfil" });
-  if (await mobileTab.isVisible().catch(() => false)) await mobileTab.click();
-  else await page.getByRole("button", { name: "Perfil", exact: true }).click();
+  await openProfile(page);
+  await page.getByRole("tab", { name: "Cuenta" }).click();
   await page.getByRole("button", { name: "Cerrar sesión" }).last().click();
   await expect(page.getByRole("button", { name: "Iniciar sesión" })).toBeVisible();
 });

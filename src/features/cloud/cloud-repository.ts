@@ -25,7 +25,10 @@ export interface CloudQueryClient {
   auth: {
     getUser(): PromiseLike<CloudResult<{ user: { id: string } | null }>>;
   };
-  rpc(name: "ensure_athlete_profile" | "hydrate_athlete_state"): PromiseLike<CloudResult<unknown>>;
+  rpc(
+    name: "ensure_athlete_profile" | "hydrate_athlete_state" | "update_avatar_path",
+    values?: Record<string, JsonValue>
+  ): PromiseLike<CloudResult<unknown>>;
   functions?: {
     invoke(name: "generate-plan", options: { body: PlanGenerationInput }): PromiseLike<CloudResult<PlanGenerationJob>>;
   };
@@ -44,6 +47,7 @@ export interface CloudQueryClient {
 export type CloudRepository = {
   ensureProfile(): Promise<void>;
   hydrate(): Promise<CloudHydration>;
+  saveAvatarPath(path: string | null): Promise<void>;
   submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
   appendFacts(facts: FactWrite[]): Promise<void>;
   saveGuidedState(state: JsonValue, idempotencyKey: string): Promise<void>;
@@ -79,12 +83,22 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       const { data, error } = await client.rpc("hydrate_athlete_state");
       if (error || !data || typeof data !== "object") throw failure("unavailable");
       const snapshot = data as CloudHydration;
+      const rawProfile = snapshot.profile as (typeof snapshot.profile & { avatar_path?: unknown }) | undefined;
       return {
         facts: Array.isArray(snapshot.facts) ? snapshot.facts : [],
         sessionLogs: Array.isArray(snapshot.sessionLogs) ? snapshot.sessionLogs : [],
         guided: snapshot.guided ?? { schemaVersion: 1, activeRun: null, history: [] },
-        activePlan: snapshot.activePlan ?? null
+        activePlan: snapshot.activePlan ?? null,
+        profile: {
+          avatarPath: typeof rawProfile?.avatar_path === "string"
+            ? rawProfile.avatar_path
+            : snapshot.profile?.avatarPath ?? null
+        }
       };
+    },
+    async saveAvatarPath(path) {
+      await athleteId(client);
+      await requireSuccess(client.rpc("update_avatar_path", { p_avatar_path: path }));
     },
     async submitQuestionnaire({ version, answers, idempotencyKey }) {
       const id = await athleteId(client);

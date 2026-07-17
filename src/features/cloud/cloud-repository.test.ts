@@ -55,12 +55,31 @@ describe("cloud repository", () => {
       facts: [{ id: "fact-1", fact_key: "name", value: "Mateo" }],
       sessionLogs: [{ id: "log-1", metrics: { attempts: 4 } }],
       guided: { schemaVersion: 1, activeRun: null, history: [] },
-      activePlan: { id: "plan-1" }
+      activePlan: { id: "plan-1" },
+      profile: { avatar_path: "athlete-1/avatar.webp" }
     }, error: null });
 
     await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
-      facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" }
+      facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" },
+      profile: { avatarPath: "athlete-1/avatar.webp" }
     });
+  });
+
+  it("persists the profile photo path for the authenticated athlete", async () => {
+    const fake = createFakeClient();
+
+    await createCloudRepository(fake.client).saveAvatarPath("athlete-1/avatar.png");
+
+    expect(fake.rpc).toHaveBeenCalledWith("update_avatar_path", { p_avatar_path: "athlete-1/avatar.png" });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("clears the profile photo path for the authenticated athlete", async () => {
+    const fake = createFakeClient();
+
+    await createCloudRepository(fake.client).saveAvatarPath(null);
+
+    expect(fake.rpc).toHaveBeenCalledWith("update_avatar_path", { p_avatar_path: null });
   });
 
   it("uses caller-stable IDs when retrying facts, logs, and guided state", async () => {
