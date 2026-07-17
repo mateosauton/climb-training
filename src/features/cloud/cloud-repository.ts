@@ -47,7 +47,7 @@ export interface CloudQueryClient {
 export type CloudRepository = {
   ensureProfile(): Promise<void>;
   hydrate(): Promise<CloudHydration>;
-  saveAvatarPath(path: string): Promise<void>;
+  saveAvatarPath(path: string | null): Promise<void>;
   submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
   appendFacts(facts: FactWrite[]): Promise<void>;
   saveGuidedState(state: JsonValue, idempotencyKey: string): Promise<void>;

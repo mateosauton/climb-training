@@ -74,6 +74,14 @@ describe("cloud repository", () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it("clears the profile photo path for the authenticated athlete", async () => {
+    const fake = createFakeClient();
+
+    await createCloudRepository(fake.client).saveAvatarPath(null);
+
+    expect(fake.rpc).toHaveBeenCalledWith("update_avatar_path", { p_avatar_path: null });
+  });
+
   it("uses caller-stable IDs when retrying facts, logs, and guided state", async () => {
     const fake = createFakeClient();
     const repository = createCloudRepository(fake.client);

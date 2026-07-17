@@ -245,6 +245,31 @@ describe("cloud-primary app integration", () => {
     expect(createSignedUrl).toHaveBeenLastCalledWith("test-user/avatar.png", 60);
   });
 
+  it("clears the stored avatar before deleting its private object", async () => {
+    localStorage.setItem("climb4w.state.v1", JSON.stringify({ ...defaultState, profile: { ...defaultState.profile, questionnaireCompleted: true } }));
+    const calls: string[] = [];
+    const saveAvatarPath = vi.fn(async (path: string | null) => { calls.push(`save:${path}`); });
+    const remove = vi.fn(async () => { calls.push("remove"); return { data: null, error: null }; });
+    const cloud = { ...repository(vi.fn(async () => undefined)), saveAvatarPath };
+    const cloudAvatarClient = { storage: { from: () => ({
+      upload: vi.fn(),
+      remove,
+      createSignedUrl: vi.fn(async () => ({ data: { signedUrl: "https://signed.test/avatar" }, error: null }))
+    }) } };
+    const hydration = {
+      facts: [], sessionLogs: [], guided: { schemaVersion: 1 as const, activeRun: null, history: [] }, activePlan: null,
+      profile: { avatarPath: "test-user/avatar.png" }
+    };
+    render(<App cloudRepository={cloud} cloudAvatarClient={cloudAvatarClient} cloudHydration={hydration} />);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Eliminar foto" }));
+
+    await waitFor(() => expect(saveAvatarPath).toHaveBeenCalledWith(null));
+    expect(remove).toHaveBeenCalledWith(["test-user/avatar.png"]);
+    expect(calls).toEqual(["save:null", "remove"]);
+  });
+
   it("deletes a previous cross-extension avatar only after the replacement is persisted", async () => {
     vi.useFakeTimers();
     const calls: string[] = [];
@@ -301,8 +326,9 @@ describe("cloud-primary app integration", () => {
     localStorage.setItem("climb4w.state.v1", JSON.stringify({ ...defaultState, profile: { ...defaultState.profile, questionnaireCompleted: true } }));
     render(<App cloudRepository={cloud} />);
     await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    await user.click(await screen.findByRole("tab", { name: "Escalada" }));
     fireEvent.change(await screen.findByLabelText("Grado actual"), { target: { value: "7c" } });
-    await user.click(screen.getByRole("button", { name: "Guardar objetivos" }));
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
     await waitFor(() => expect(appendFacts).toHaveBeenCalled());
     await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
     await user.click(screen.getByRole("button", { name: "Guardar log" }));

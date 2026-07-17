@@ -39,16 +39,22 @@ describe("user data App integration", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    const age = await screen.findByLabelText("Edad");
+    fireEvent.change(age, { target: { value: "28" } });
+    await user.click(await screen.findByRole("tab", { name: "Escalada" }));
     const grade = await screen.findByLabelText("Grado actual");
     fireEvent.change(grade, { target: { value: "7c" } });
-    await user.click(screen.getByRole("button", { name: "Guardar objetivos" }));
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     await waitFor(() => {
       const envelope = JSON.parse(localStorage.getItem(USER_DATA_STORAGE_KEY) || "null");
       const facts = envelope.users[envelope.activeUserId].facts.filter((fact: { key: string }) => fact.key === "currentGrade");
+      const ageFacts = envelope.users[envelope.activeUserId].facts.filter((fact: { key: string }) => fact.key === "age");
       expect(facts.at(-1)).toMatchObject({ value: "7c", source: { type: "profile-form" } });
       expect(facts.at(-1).supersedes).toBe(facts.at(-2).id);
+      expect(ageFacts.at(-1)).toMatchObject({ value: "28", source: { type: "profile-form" } });
     });
+    expect(await screen.findByText("28 años · Argentina")).toBeInTheDocument();
   });
 
   it("keeps corrupt v3 JSON unchanged and shows a persistent warning", async () => {

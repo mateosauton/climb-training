@@ -77,6 +77,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ProfilePhotoPicker } from "@/features/profile/ProfilePhotoPicker";
+import { UserProfile } from "@/features/profile/UserProfile";
 import { AVATAR_REFRESH_DELAY_MS, avatarRetryDelayMs, createAvatarSignedUrl, removeAvatar, uploadAvatar } from "@/features/cloud/cloud-avatar";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -1717,6 +1718,32 @@ export default function App({
     setAvatarFile(file);
   }
 
+  async function removeProfileAvatar() {
+    const previousPath = avatarPathRef.current;
+    setAvatarFile(null);
+    if (!previousPath) {
+      setAvatarUrl(null);
+      return;
+    }
+    if (!cloudAvatarClient || !cloudRepository) {
+      setAvatarError("No pudimos eliminar la foto sin conexión a la nube.");
+      return;
+    }
+    setAvatarSaving(true);
+    setAvatarError("");
+    try {
+      await cloudRepository.saveAvatarPath(null);
+      await removeAvatar(cloudAvatarClient, previousPath);
+      avatarPathRef.current = null;
+      setAvatarPath(null);
+      setAvatarUrl(null);
+    } catch {
+      setAvatarError("No pudimos eliminar tu foto de perfil. Intentá nuevamente.");
+    } finally {
+      setAvatarSaving(false);
+    }
+  }
+
   async function saveGuidedToCloud(state) {
     if (!cloudRepository) return;
     const pending = pendingGuided.current || { state, idempotencyKey: makeId() };
@@ -1739,21 +1766,8 @@ export default function App({
     setActiveTab("plan");
   }
 
-  function saveProfile(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const field = (name, fallback = "") => {
-      const value = form.get(name);
-      return value === null ? fallback : String(value);
-    };
+  function saveProfile(values) {
     const now = new Date().toISOString();
-    const values = {
-      currentGrade: field("currentGrade", state.goals.currentGrade),
-      targetGrade: field("targetGrade", state.goals.targetGrade),
-      project: field("project", state.goals.project),
-      focus: field("focus", state.goals.focus),
-      ...Object.fromEntries(profileFields.map((name) => [name, field(name, state.profile[name])]))
-    };
     let appended = [];
     updateActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "profile-form", version: 1 }, now, makeId);
@@ -2990,6 +3004,34 @@ export default function App({
         </TabsContent>
 
         <TabsContent value="profile" className="mt-0">
+          <UserProfile
+            profile={state.profile}
+            goals={state.goals}
+            logs={state.logs}
+            avatarFile={avatarFile}
+            avatarUrl={avatarUrl}
+            avatarError={avatarError}
+            avatarSaving={avatarSaving}
+            avatarDisabled={!cloudAvatarClient || !cloudRepository}
+            onAvatarFileChange={handleAvatarFileChange}
+            onSaveAvatar={saveAvatar}
+            onRemoveAvatar={removeProfileAvatar}
+            onSave={saveProfile}
+            email={authUser.email || ""}
+            exportJson={exportJson}
+            theme={theme}
+            onCopyJson={() => void navigator.clipboard?.writeText(exportJson)}
+            onDownloadJson={downloadJson}
+            onReset={() => void resetData()}
+            onSignOut={onSignOut}
+            onOpenQuestionnaire={() => setQuestionnaireOpen(true)}
+            onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            signingOut={signingOut}
+            authError={authError || ""}
+          />
+        </TabsContent>
+
+        <TabsContent value="legacy-profile" className="mt-0">
           <section id="profile" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
