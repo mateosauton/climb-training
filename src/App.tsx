@@ -1879,7 +1879,7 @@ export default function App({
     setLogForm((current) => ({ ...current, [field]: value }));
   }
 
-  function submitLog(event) {
+  async function submitLog(event) {
     event.preventDefault();
     const values = {};
     for (const field of logNumberFields) {
@@ -1898,15 +1898,34 @@ export default function App({
       notes: logForm.notes,
       ...values
     };
-    if (!persistActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }))) return;
-    if (cloudRepository) {
-      const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
-      pendingLog.current = submission;
-      void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
-        setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
-      });
+    const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
+    const current = userDataRef.current;
+    const userId = current.activeUserId;
+    const nextUser = { ...current.users[userId], sessionLogs: [...current.users[userId].sessionLogs, log] };
+    const next = { ...current, users: { ...current.users, [userId]: nextUser } };
+    const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+    if (!recovery.ok) {
+      setUserDataWarning(`No pudimos guardar los datos locales: ${recovery.error}`);
+      if (!cloudRepository) return;
+      try {
+        await cloudRepository.appendSessionLog(submission);
+      } catch {
+        setLogError("No pudimos guardar el log. Reintentá en unos segundos.");
+        return;
+      }
     }
-    updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
+    userDataRef.current = next;
+    setUserData(next);
+    if (cloudRepository) {
+      pendingLog.current = submission;
+      if (recovery.ok) {
+        void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
+          setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
+        });
+      } else {
+        pendingLog.current = null;
+      }
+    }
     setSavedRecommendation({
       log,
       session: selectedSession,
