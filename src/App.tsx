@@ -1630,7 +1630,7 @@ export default function App({
     const result = persistRecoveryBeforeCloudEffect(localStorage, next);
     if (!result.ok) {
       setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
-      return false;
+      if (!cloudVerified) return false;
     }
     userDataRef.current = next;
     setUserData(next);
