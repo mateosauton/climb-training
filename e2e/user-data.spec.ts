@@ -26,7 +26,12 @@ async function seedLegacy(page: Page) {
 }
 
 async function openProfile(page: Page) {
-  await page.getByRole("button", { name: /Abrir perfil de/ }).click();
+  const profileButton = page.getByRole("button", { name: /Abrir perfil de/ });
+  if ((page.viewportSize()?.width || 0) < 768) {
+    await page.getByRole("button", { name: "Toggle Sidebar" }).first().click();
+  }
+  await expect(profileButton).toBeInViewport();
+  await profileButton.click();
   await expect(page.getByText("Perfil del escalador", { exact: true })).toBeVisible();
 }
 
