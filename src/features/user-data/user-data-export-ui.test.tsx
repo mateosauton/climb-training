@@ -18,10 +18,10 @@ describe("user data export UI", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
-    expect(await screen.findByText("Archivo sensible")).toBeInTheDocument();
-    expect(screen.getByText(/Usuario activo:/)).toBeInTheDocument();
+    await user.click(await screen.findByRole("tab", { name: "Cuenta" }));
+    expect(screen.getByText("Respaldo de datos")).toBeInTheDocument();
+    expect(screen.getByText(/incluye perfil, sesiones y análisis/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Ver JSON" }));
     const exported = JSON.parse((screen.getByLabelText("JSON exportado del tracker") as HTMLTextAreaElement).value);
     expect(exported.schemaVersion).toBe(3);
     expect(exported.users[exported.activeUserId].facts.length).toBeGreaterThan(0);
