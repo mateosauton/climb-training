@@ -139,6 +139,17 @@ describe("AuthProvider", () => {
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("invalid_credentials");
   });
 
+  it("explains when the confirmation email service is temporarily full", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.signUp).mockResolvedValue({ session: null, error: "email_rate_limit" });
+    renderProvider(auth);
+    await waitFor(() => expect(screen.getByLabelText("auth-state")).toHaveTextContent('"loading":false'));
+
+    await userEvent.click(screen.getByRole("button", { name: "sign up" }));
+
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("El servicio de correo alcanzó su límite temporal");
+  });
+
   it("ignores a repeated action while the first is pending", async () => {
     const auth = fakeClient();
     vi.mocked(auth.client.signIn).mockReturnValue(new Promise(() => undefined));
