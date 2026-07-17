@@ -79,7 +79,9 @@ test("profile history and export controls remain usable without leaking data", a
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   for (const name of ["Copiar JSON", "Descargar", "Borrar datos locales"]) {
-    await expect(page.getByRole("button", { name })).toBeInViewport();
+    const action = page.getByRole("button", { name });
+    await action.scrollIntoViewIfNeeded();
+    await expect(action).toBeInViewport();
   }
   expect(leakedRequests).toEqual([]);
 });
