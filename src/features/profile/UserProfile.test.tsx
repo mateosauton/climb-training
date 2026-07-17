@@ -76,4 +76,31 @@ describe("UserProfile", () => {
     expect(age).toHaveFocus();
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it("falls back to plan progress when grades are not comparable", () => {
+    renderProfile({ goals: { ...defaultState.goals, currentGrade: "V6", targetGrade: "7a" }, planProgress: 42 });
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByText("Progreso del plan")).toBeInTheDocument();
+  });
+
+  it("moves focus to the editor from the header action", async () => {
+    renderProfile();
+    await userEvent.click(screen.getByRole("button", { name: "Editar perfil" }));
+    expect(screen.getByLabelText("Editor de perfil")).toHaveFocus();
+  });
+
+  it("announces a recoverable cloud synchronization warning", async () => {
+    renderProfile({ onSave: async () => ({ syncWarning: "Cambios guardados localmente. La sincronización quedó pendiente." }) });
+    await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    expect(await screen.findByText("Cambios guardados localmente. La sincronización quedó pendiente.")).toBeInTheDocument();
+  });
+
+  it("supports keyboard navigation between editing tabs", async () => {
+    const user = userEvent.setup();
+    renderProfile();
+    const general = screen.getByRole("tab", { name: "General" });
+    general.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Escalada" })).toHaveAttribute("aria-selected", "true");
+  });
 });

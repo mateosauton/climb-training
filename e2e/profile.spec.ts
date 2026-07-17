@@ -69,5 +69,11 @@ test("profile shows age, preserves a cross-tab draft and persists it", async ({ 
   await expect(page.getByText("V7 actual")).toBeVisible();
   await expect(page.getByRole("tab", { name: "General" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Cuenta" })).toBeVisible();
+  const editorBox = await page.getByLabel("Editor de perfil").boundingBox();
+  const summaryBox = await page.getByLabel("Resumen del atleta").boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(summaryBox).not.toBeNull();
+  if ((page.viewportSize()?.width || 0) < 1280) expect(summaryBox!.y).toBeGreaterThan(editorBox!.y);
+  else expect(summaryBox!.x).toBeGreaterThan(editorBox!.x);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
 });

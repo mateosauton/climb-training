@@ -13,10 +13,10 @@ const frenchGrades = [
 ];
 
 function weekStart(date: Date): number {
-  const utc = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-  const day = date.getUTCDay();
+  const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const day = date.getDay();
   const daysSinceMonday = day === 0 ? 6 : day - 1;
-  return utc - daysSinceMonday * DAY_MS;
+  return localMidnight - daysSinceMonday * DAY_MS;
 }
 
 function logsInWeek(logs: SessionLog[], now: Date): SessionLog[] {

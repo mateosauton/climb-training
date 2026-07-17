@@ -61,6 +61,7 @@ type UserProfileProps = {
   profile: TrackerState["profile"];
   goals: TrackerState["goals"];
   logs: SessionLog[];
+  planProgress?: number | null;
   now?: Date;
   avatarFile: AvatarFile | null;
   avatarUrl: string | null;
@@ -70,7 +71,7 @@ type UserProfileProps = {
   onAvatarFileChange: (file: AvatarFile) => void;
   onSaveAvatar?: () => void | Promise<void>;
   onRemoveAvatar?: () => void | Promise<void>;
-  onSave: (values: ProfileDraft) => void | Promise<void>;
+  onSave: (values: ProfileDraft) => void | { syncWarning?: string | null } | Promise<void | { syncWarning?: string | null }>;
   email: string;
   exportJson: string;
   theme?: "light" | "dark" | string;
@@ -181,6 +182,7 @@ export function UserProfile({
   profile,
   goals,
   logs,
+  planProgress = null,
   now = new Date(),
   avatarFile,
   avatarUrl,
@@ -205,7 +207,8 @@ export function UserProfile({
 }: UserProfileProps) {
   const [draft, setDraft] = useState(() => buildDraft(profile, goals));
   const [ageError, setAgeError] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "warning" | "error">("idle");
+  const [saveWarning, setSaveWarning] = useState("");
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setDraft(buildDraft(profile, goals)), [profile, goals]);
@@ -222,6 +225,7 @@ export function UserProfile({
     setDraft((current) => ({ ...current, [name]: value }));
     if (name === "age") setAgeError("");
     setSaveStatus("idle");
+    setSaveWarning("");
   };
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -233,15 +237,18 @@ export function UserProfile({
       return;
     }
     setSaveStatus("saving");
+    setSaveWarning("");
     try {
-      await onSave(Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim()])) as ProfileDraft);
-      setSaveStatus("saved");
+      const result = await onSave(Object.fromEntries(Object.entries(draft).map(([key, value]) => [key, value.trim()])) as ProfileDraft);
+      const syncWarning = result && typeof result === "object" ? result.syncWarning : null;
+      setSaveStatus(syncWarning ? "warning" : "saved");
+      if (syncWarning) setSaveWarning(syncWarning);
     } catch {
       setSaveStatus("error");
     }
   }
 
-  const progressValue = metrics.progress;
+  const progressValue = metrics.progress ?? planProgress;
   const progressLabel = progressValue === null ? "Sin datos" : `${progressValue}%`;
 
   return (
@@ -266,7 +273,10 @@ export function UserProfile({
               <Badge>{goals.targetGrade || "—"} objetivo</Badge>
               <Badge variant="outline">Plan activo</Badge>
             </div>
-            <Button type="button" variant="outline" onClick={() => editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <Button type="button" variant="outline" onClick={() => {
+              editorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+              editorRef.current?.focus({ preventScroll: true });
+            }}>
               <UserRound className="size-4" />
               Editar perfil
             </Button>
@@ -278,11 +288,17 @@ export function UserProfile({
         <MetricCard label="Racha" value={`${metrics.streak} ${metrics.streak === 1 ? "semana" : "semanas"}`} helper="Semanas consecutivas activas" icon={Flame} />
         <MetricCard label="Esta semana" value={`${metrics.sessions} ${metrics.sessions === 1 ? "sesión" : "sesiones"}`} helper="Sesiones registradas" icon={Activity} />
         <MetricCard label="Carga" value={metrics.load} helper="Según volumen y esfuerzo" icon={TrendingUp} />
-        <MetricCard label="Progreso" value={progressLabel} helper={progressValue === null ? "Completá grados comparables" : `${goals.currentGrade} → ${goals.targetGrade}`} icon={Target} progress={progressValue} />
+        <MetricCard
+          label="Progreso"
+          value={progressLabel}
+          helper={metrics.progress !== null ? `${goals.currentGrade} → ${goals.targetGrade}` : progressValue !== null ? "Progreso del plan" : "Completá grados comparables"}
+          icon={Target}
+          progress={progressValue}
+        />
       </div>
 
       <form onSubmit={submit} className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card ref={editorRef} className="scroll-mt-4 border-border/70 bg-card/90">
+        <Card ref={editorRef} tabIndex={-1} aria-label="Editor de perfil" className="scroll-mt-4 border-border/70 bg-card/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <CardHeader>
             <CardTitle>Editar perfil</CardTitle>
             <CardDescription>Los cambios se conservan al navegar entre pestañas y se guardan juntos.</CardDescription>
@@ -407,7 +423,7 @@ export function UserProfile({
               </Button>
               <Button type="button" variant="outline" onClick={onOpenQuestionnaire}><ClipboardList className="size-4" />Abrir cuestionario</Button>
               <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-                {saveStatus === "saved" ? "Cambios guardados." : saveStatus === "error" ? "No pudimos guardar los cambios." : ""}
+                {saveStatus === "saved" ? "Cambios guardados." : saveStatus === "warning" ? saveWarning : saveStatus === "error" ? "No pudimos guardar los cambios." : ""}
               </p>
             </div>
           </CardContent>

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../../App";
 import { defaultState } from "../../lib/training";
 import { USER_DATA_STORAGE_KEY } from "./user-data-storage";
@@ -9,6 +9,8 @@ describe("user data App integration", () => {
   beforeEach(() => {
     localStorage.clear();
   });
+
+  afterEach(() => vi.restoreAllMocks());
 
   it("migrates the legacy tracker into one persisted active user", async () => {
     localStorage.setItem("climb4w.state.v1", JSON.stringify({
@@ -55,6 +57,23 @@ describe("user data App integration", () => {
       expect(ageFacts.at(-1)).toMatchObject({ value: "28", source: { type: "profile-form" } });
     });
     expect(await screen.findByText("28 años · Argentina")).toBeInTheDocument();
+  });
+
+  it("does not report success when local profile recovery cannot be persisted", async () => {
+    localStorage.setItem("climb4w.state.v1", JSON.stringify({
+      ...defaultState,
+      profile: { ...defaultState.profile, questionnaireCompleted: true }
+    }));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    fireEvent.change(await screen.findByLabelText("Edad"), { target: { value: "28" } });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
+
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    expect(await screen.findByText("No pudimos guardar los cambios.")).toBeInTheDocument();
+    expect(screen.queryByText("28 años · Argentina")).not.toBeInTheDocument();
   });
 
   it("keeps corrupt v3 JSON unchanged and shows a persistent warning", async () => {

@@ -334,4 +334,33 @@ describe("cloud-primary app integration", () => {
     await user.click(screen.getByRole("button", { name: "Guardar log" }));
     await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });
+
+  it("persists a cloud-primary profile recovery before reporting a sync warning", async () => {
+    const appendFacts = vi.fn(async () => { throw new Error("offline"); });
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendFacts };
+    const hydration = {
+      facts: [{
+        id: "00000000-0000-4000-8000-000000000099",
+        fact_key: "questionnaireCompleted",
+        value: true,
+        source: { type: "import", field: "questionnaireCompleted", version: 1, category: "preference", unit: "boolean" },
+        created_at: "2026-07-17T10:00:00.000Z"
+      }],
+      sessionLogs: [],
+      guided: { schemaVersion: 1 as const, activeRun: null, history: [] },
+      activePlan: null,
+      profile: { avatarPath: null }
+    };
+    const user = userEvent.setup();
+    render(<App cloudRepository={cloud} cloudVerified cloudHydration={hydration} />);
+
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    fireEvent.change(await screen.findByLabelText("Edad"), { target: { value: "28" } });
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    await waitFor(() => expect(appendFacts).toHaveBeenCalled());
+    expect(await screen.findByText("Cambios guardados localmente. La sincronización quedó pendiente.")).toBeInTheDocument();
+    const envelope = JSON.parse(localStorage.getItem("climb4w.users.v3") || "null");
+    expect(envelope.users[envelope.activeUserId].facts.some((fact: { key: string; value: unknown }) => fact.key === "age" && fact.value === "28")).toBe(true);
+  });
 });

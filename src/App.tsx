@@ -1301,7 +1301,11 @@ export default function App({
         value: fact.value,
         unit: fact.source?.unit || null,
         recordedAt: fact.created_at || fact.recordedAt,
-        source: fact.source || { type: "import", field: fact.fact_key || fact.key, version: 1 },
+        source: {
+          type: fact.source?.type || "import",
+          field: fact.source?.field || fact.fact_key || fact.key,
+          version: fact.source?.version ?? 1
+        },
         supersedes: fact.supersedes_id || fact.supersedes || null
       }));
       const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
@@ -1675,13 +1679,15 @@ export default function App({
   }
 
   async function appendFactsToCloud(facts) {
-    if (!cloudRepository || !facts.length) return;
+    if (!cloudRepository || !facts.length) return true;
     pendingFacts.current = facts;
     try {
       await cloudRepository.appendFacts(facts);
       pendingFacts.current = [];
+      return true;
     } catch {
       setUserDataWarning("No pudimos sincronizar tu perfil. Tus cambios quedan guardados para reintentar.");
+      return false;
     }
   }
 
@@ -1733,10 +1739,14 @@ export default function App({
     setAvatarError("");
     try {
       await cloudRepository.saveAvatarPath(null);
-      await removeAvatar(cloudAvatarClient, previousPath);
       avatarPathRef.current = null;
       setAvatarPath(null);
       setAvatarUrl(null);
+      try {
+        await removeAvatar(cloudAvatarClient, previousPath);
+      } catch {
+        setAvatarError("La foto se eliminó del perfil, pero quedó pendiente limpiar el archivo privado.");
+      }
     } catch {
       setAvatarError("No pudimos eliminar tu foto de perfil. Intentá nuevamente.");
     } finally {
@@ -1766,10 +1776,10 @@ export default function App({
     setActiveTab("plan");
   }
 
-  function saveProfile(values) {
+  async function saveProfile(values) {
     const now = new Date().toISOString();
     let appended = [];
-    updateActiveUser((current) => {
+    const persisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "profile-form", version: 1 }, now, makeId);
       appended = next.facts.slice(current.facts.length);
       return {
@@ -1777,7 +1787,9 @@ export default function App({
         identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now }
       };
     });
-    void appendFactsToCloud(appended);
+    if (!persisted) throw new Error("local_profile_persistence_failed");
+    const synced = await appendFactsToCloud(appended);
+    return synced ? undefined : { syncWarning: "Cambios guardados localmente. La sincronización quedó pendiente." };
   }
 
   async function saveQuestionnaire(payload) {
@@ -3008,6 +3020,7 @@ export default function App({
             profile={state.profile}
             goals={state.goals}
             logs={state.logs}
+            planProgress={completionPercent}
             avatarFile={avatarFile}
             avatarUrl={avatarUrl}
             avatarError={avatarError}
