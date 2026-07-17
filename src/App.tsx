@@ -19,6 +19,7 @@ import {
   Gauge,
   HelpCircle,
   ListChecks,
+  LogOut,
   Minus,
   Moon,
   Play,
@@ -48,7 +49,7 @@ import {
   AlertDialogTrigger
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -75,6 +76,9 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ProfilePhotoPicker } from "@/features/profile/ProfilePhotoPicker";
+import { UserProfile } from "@/features/profile/UserProfile";
+import { AVATAR_REFRESH_DELAY_MS, avatarRetryDelayMs, createAvatarSignedUrl, removeAvatar, uploadAvatar } from "@/features/cloud/cloud-avatar";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -121,7 +125,17 @@ import { appendChangedFacts, projectTrackerState } from "@/features/user-data/us
 import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
 import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
-import { loadUserData, saveUserData } from "@/features/user-data/user-data-storage";
+import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
+import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
+import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
+import { createCloudClient } from "@/features/cloud/cloud-client";
+import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
+import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
+import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery";
+import type { CloudRepository } from "@/features/cloud/cloud-repository";
+import type { CloudImport } from "@/features/cloud/cloud-import";
+import { readAuthConfig } from "@/features/auth/auth-config";
+import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import {
   defaultState,
   exerciseLibrary,
@@ -135,6 +149,7 @@ const THEME_STORAGE_KEY = "climb4w.theme";
 const DB_NAME = "climb4w.videos";
 const DB_VERSION = 1;
 const VIDEO_STORE = "videos";
+const cloudVideoClient = createCloudClient(readAuthConfig(import.meta.env));
 
 const defaultLogValues = {
   rpe: "8",
@@ -249,6 +264,7 @@ const tabs = [
   { value: "video", label: "Video", icon: Film },
   { value: "profile", label: "Perfil", icon: UserRound }
 ];
+const primaryTabs = tabs.filter((tab) => tab.value !== "profile");
 
 function cloneData(value) {
   if (typeof structuredClone === "function") return structuredClone(value);
@@ -291,8 +307,7 @@ function applyTheme(theme) {
 }
 
 function makeId() {
-  if (crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return crypto.randomUUID();
 }
 
 function sessionById(id) {
@@ -387,11 +402,12 @@ async function deleteVideoBlob(id) {
   });
 }
 
-async function clearVideoBlobs() {
+async function deleteVideoBlobs(ids) {
   const db = await openVideoDb();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(VIDEO_STORE, "readwrite");
-    transaction.objectStore(VIDEO_STORE).clear();
+    const store = transaction.objectStore(VIDEO_STORE);
+    ids.forEach((id) => store.delete(id));
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -815,7 +831,7 @@ function createQuestionnaireFormData(draft) {
   return form;
 }
 
-function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle }) {
+function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState(() => ({ ...profile }));
   const currentSection = QUESTIONNAIRE_SECTIONS[stepIndex];
@@ -893,6 +909,13 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
               ))}
             </div>
             <form className="space-y-5" onSubmit={submitStep}>
+              {stepIndex === 0 ? (
+                <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
+                  <h3 className="mb-3 font-semibold">Foto de perfil</h3>
+                  <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={onAvatarFileChange} disabled={avatarSaving || !avatarStorageAvailable} />
+                </section>
+              ) : null}
+              {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
               <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold">{currentSection.title}</h3>
@@ -911,7 +934,7 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                 </div>
               </section>
               <div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={onSkip}>
+                <Button type="button" variant="outline" disabled={avatarSaving} onClick={onSkip}>
                   Completar mas tarde
                 </Button>
                 <Button
@@ -923,9 +946,9 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                   <ChevronLeft className="size-4" />
                   Atras
                 </Button>
-                <Button type="submit">
+                <Button type="submit" disabled={avatarSaving}>
                   {isLastStep ? <Save className="size-4" /> : <ChevronRight className="size-4" />}
-                  {isLastStep ? "Guardar cuestionario" : "Siguiente"}
+                  {avatarSaving ? "Guardando foto…" : isLastStep ? "Guardar cuestionario" : "Siguiente"}
                 </Button>
               </div>
             </form>
@@ -1015,10 +1038,18 @@ function TrainingSidebar({
   setActiveWeek,
   risk,
   goals,
+  profile,
+  avatarUrl,
   theme,
-  onThemeToggle
+  onThemeToggle,
+  accountEmail,
+  onSignOut,
+  authError,
+  signingOut
 }) {
   const { setOpenMobile } = useSidebar();
+  const athleteName = profile.name || "Escalador";
+  const initials = athleteName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E";
 
   function goToTab(value) {
     setActiveTab(value);
@@ -1042,32 +1073,37 @@ function TrainingSidebar({
         <div className="flex items-center gap-2">
           <SidebarMenu className="min-w-0 flex-1">
             <SidebarMenuItem>
+              <div className="flex items-center gap-2 px-2 py-1">
+                <button type="button" className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" aria-label={`Abrir perfil de ${athleteName}`} onClick={() => goToTab("profile")}>
+                  <Avatar className="size-9">
+                    <AvatarImage src={avatarUrl || undefined} alt={`Foto de ${athleteName}`} />
+                    <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground">{initials}</AvatarFallback>
+                  </Avatar>
+                </button>
+                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                  <span className="truncate font-medium">{athleteName}</span>
+                  <span className="truncate text-xs text-sidebar-foreground/70">{goals.currentGrade} → {goals.targetGrade}</span>
+                </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <SidebarMenuButton
-                    size="lg"
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
                     aria-label="Menu del bloque de escalada"
                     title="Menu del bloque de escalada"
-                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                    className="ml-auto size-8 shrink-0 data-[state=open]:bg-sidebar-accent"
                   >
-                    <Avatar className="size-8 rounded-lg">
-                      <AvatarFallback className="rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">MS</AvatarFallback>
-                    </Avatar>
-                    <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-medium">Climbing block</span>
-                      <span className="truncate text-xs text-sidebar-foreground/70">{goals.currentGrade} a {goals.targetGrade}</span>
-                    </div>
-                    <Dumbbell className="ml-auto size-4" />
-                  </SidebarMenuButton>
+                    <Dumbbell className="size-4" />
+                  </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="right" align="start" className="w-60">
                   <DropdownMenuLabel>Bloque actual</DropdownMenuLabel>
                   <DropdownMenuItem onClick={() => goToTab("plan")}>{goals.project}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => goToTab("video")}>{goals.focus}</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => goToTab("profile")}>Perfil del escalador</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              </div>
             </SidebarMenuItem>
           </SidebarMenu>
           <Button
@@ -1121,7 +1157,7 @@ function TrainingSidebar({
           <SidebarGroupLabel>Navegacion</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {tabs.map(({ value, label, icon: Icon }) => (
+              {primaryTabs.map(({ value, label, icon: Icon }) => (
                 <SidebarMenuItem key={value}>
                   <SidebarMenuButton
                     type="button"
@@ -1210,6 +1246,15 @@ function TrainingSidebar({
           >
             {risk.title}
           </Badge>
+          <Separator />
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium text-sidebar-foreground">{accountEmail || "Cuenta Supabase"}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-2 w-full justify-start" onClick={onSignOut} disabled={signingOut}>
+              <LogOut className="size-4" />
+              {signingOut ? "Cerrando…" : "Cerrar sesión"}
+            </Button>
+            {authError ? <p role="alert" className="mt-2 text-xs text-destructive">{authError}</p> : null}
+          </div>
         </div>
       </SidebarFooter>
       <SidebarRail />
@@ -1217,13 +1262,70 @@ function TrainingSidebar({
   );
 }
 
-export default function App() {
-  const [initialUserLoad] = useState(() => loadUserData(localStorage, {
-    now: () => new Date().toISOString(),
-    makeId,
-    normalizeLegacyTracker: normalizeState,
-    guidedDefinitions: guidedSessionDefinitions
-  }));
+export default function App({
+  authUser = { id: "test-user", email: null },
+  onSignOut = async () => undefined,
+  authError = null,
+  signingOut = false,
+  cloudRepository = null,
+  cloudImport = null,
+  loadLegacyVideoBlob = getVideo,
+  uploadLegacyVideo = null,
+  cloudAvatarClient = null,
+  cloudVerified = false,
+  cloudHydration = null
+}) {
+  const [initialUserLoad] = useState(() => {
+    const loaded = loadUserData(localStorage, {
+      now: () => new Date().toISOString(),
+      makeId,
+      normalizeLegacyTracker: normalizeState,
+      guidedDefinitions: guidedSessionDefinitions
+    });
+    const canonical = cloudVerified
+      ? migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: emptyGuidedSessionState(), now: new Date().toISOString(), makeId })
+      : loaded.envelope;
+    let envelope = activateAuthenticatedUser(canonical, authUser, { now: new Date().toISOString(), makeId });
+    let warning = loaded.warning;
+    if (loaded.canPersist && !cloudVerified) {
+      const saved = saveUserData(localStorage, envelope);
+      if (saved.ok === false) warning = `No pudimos guardar los datos locales: ${saved.error}`;
+    }
+    if (cloudHydration) {
+      const active = envelope.users[envelope.activeUserId];
+      const facts = (cloudHydration.facts || []).map((fact) => ({
+        id: fact.id,
+        userId: active.identity.id,
+        category: fact.source?.category || "preference",
+        key: fact.fact_key || fact.key,
+        value: fact.value,
+        unit: fact.source?.unit || null,
+        recordedAt: fact.created_at || fact.recordedAt,
+        source: {
+          type: fact.source?.type || "import",
+          field: fact.source?.field || fact.fact_key || fact.key,
+          version: fact.source?.version ?? 1
+        },
+        supersedes: fact.supersedes_id || fact.supersedes || null
+      }));
+      const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
+        id: log.id,
+        sessionId: log.metrics?.sessionId || log.session_id || "w1d1",
+        createdAt: log.created_at || log.createdAt,
+        notes: log.body || log.metrics?.notes || "",
+        ...log.metrics,
+        rpe: log.rpe ?? log.metrics?.rpe ?? 0,
+        pump: log.pump ?? log.metrics?.pump ?? 0,
+        pain: log.pain ?? log.metrics?.pain ?? 0,
+        energy: log.energy ?? log.metrics?.energy ?? 0
+      }));
+      envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: {
+        ...active, facts, sessionLogs,
+        guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
+      } } };
+    }
+    return { ...loaded, envelope, recoveryEnvelope: loaded.envelope, warning };
+  });
   const [userData, setUserData] = useState(initialUserLoad.envelope);
   const [userDataWarning, setUserDataWarning] = useState(initialUserLoad.warning);
   const userDataRef = useRef(userData);
@@ -1237,28 +1339,70 @@ export default function App() {
   const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
   const [logForm, setLogForm] = useState(defaultLogValues);
   const [logError, setLogError] = useState("");
+  const [savedRecommendation, setSavedRecommendation] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
+  const [pendingVideoId, setPendingVideoId] = useState(null);
   const [videoValues, setVideoValues] = useState(defaultVideoValues);
   const [videoNotes, setVideoNotes] = useState("");
   const [showJson, setShowJson] = useState(false);
   const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
+  const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
+  const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState(null);
+  const [avatarPath, setAvatarPath] = useState(cloudHydration?.profile?.avatarPath || null);
+  const [avatarRevision, setAvatarRevision] = useState(0);
+  const avatarPathRef = useRef(avatarPath);
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSaving, setAvatarSaving] = useState(false);
+  const pendingQuestionnaire = useRef(null);
+  const pendingFacts = useRef([]);
+  const pendingLog = useRef(null);
+  const pendingGuided = useRef(null);
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
-    body: "Sube un clip MP4, MOV o WebM. El analisis queda guardado localmente."
+    body: "Sube un clip MP4, MOV o WebM. Conservamos una copia local hasta verificar la carga privada."
   });
   const detailRef = useRef(null);
   const videoRef = useRef(null);
   const skipInitialUserSave = useRef(true);
 
   useEffect(() => {
+    const pending = activeUser.videoAnalyses.find((video) => video.cloud && video.cloud.uploadStatus !== "uploaded");
+    if (!pending || pendingVideoId || videoFile) return;
+    const recover = async () => {
+      if (cloudVideoClient) {
+        const service = createCloudVideoService(cloudVideoClient);
+        const recovered = await reconcileUploadedVideoRecovery(pending, {
+          reconciledUpload: service.reconciledUpload,
+          appendAnalysis: service.appendAnalysis,
+          persistUploaded: (videoId, path) => persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === videoId ? { ...video, cloud: { id: video.cloud?.id || videoId, path, uploadStatus: "uploaded" } } : video) })),
+          deleteBlob: deleteVideoBlob
+        }).catch(() => false);
+        if (recovered) return;
+      }
+      const blob = await getVideo(pending.id);
+      if (!blob) return;
+      const file = blob instanceof File ? blob : new File([blob], pending.fileName, { type: `video/${pending.fileName.split(".").pop()}` });
+      setVideoFile(file);
+      setVideoMeta({ name: pending.fileName, size: pending.size, duration: pending.duration });
+      setPendingVideoId(pending.id);
+      setSelectedSessionId(pending.sessionId);
+      setVideoUrl(URL.createObjectURL(file));
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "Recuperamos tu video local. Puedes reintentar la carga privada." });
+    };
+    recover().catch(() => undefined);
+  }, [activeUser.videoAnalyses, pendingVideoId, videoFile]);
+
+  useEffect(() => {
     if (skipInitialUserSave.current) {
       skipInitialUserSave.current = false;
       return;
     }
-    if (!initialUserLoad.canPersist) return;
+    if (!initialUserLoad.canPersist || cloudVerified) return;
     const result = saveUserData(localStorage, userData);
     if (!result.ok) setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
   }, [initialUserLoad.canPersist, userData]);
@@ -1266,6 +1410,41 @@ export default function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    setAvatarPath(cloudHydration?.profile?.avatarPath || null);
+  }, [cloudHydration?.profile?.avatarPath]);
+
+  useEffect(() => {
+    const path = avatarPath;
+    avatarPathRef.current = path;
+    if (!cloudAvatarClient || !path) {
+      setAvatarUrl(null);
+      return;
+    }
+    let current = true;
+    let timer;
+    let retryAttempt = 0;
+    const refresh = async () => {
+      try {
+        const url = await createAvatarSignedUrl(cloudAvatarClient, path);
+        if (!current) return;
+        setAvatarUrl(url);
+        retryAttempt = 0;
+        timer = setTimeout(refresh, AVATAR_REFRESH_DELAY_MS);
+      } catch {
+        if (!current) return;
+        setAvatarUrl(null);
+        timer = setTimeout(refresh, avatarRetryDelayMs(retryAttempt));
+        retryAttempt += 1;
+      }
+    };
+    void refresh();
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [cloudAvatarClient, avatarPath, avatarRevision]);
 
   useEffect(() => {
     return () => {
@@ -1426,23 +1605,12 @@ export default function App() {
       return current.users[current.activeUserId].guidedSessions;
     },
     replaceGuidedSessions: (guidedSessions) => {
-      setUserData((current) => {
-        const userId = current.activeUserId;
-        const user = current.users[userId];
-        const next = {
-          ...current,
-          users: {
-            ...current.users,
-            [userId]: {
-              ...user,
-              identity: { ...user.identity, updatedAt: new Date().toISOString() },
-              guidedSessions
-            }
-          }
-        };
-        userDataRef.current = next;
-        return next;
-      });
+      const persisted = persistActiveUser((user) => ({
+        ...user,
+        identity: { ...user.identity, updatedAt: new Date().toISOString() },
+        guidedSessions
+      }));
+      if (persisted) void saveGuidedToCloud(guidedSessions);
     }
   }), []);
 
@@ -1458,6 +1626,146 @@ export default function App() {
     });
   }
 
+  function persistActiveUser(update) {
+    const current = userDataRef.current;
+    const userId = current.activeUserId;
+    const nextUser = update(current.users[userId]);
+    const next = nextUser === current.users[userId] ? current : { ...current, users: { ...current.users, [userId]: nextUser } };
+    const result = persistRecoveryBeforeCloudEffect(localStorage, next);
+    if (!result.ok) {
+      setUserDataWarning(`No pudimos guardar los datos locales: ${result.error}`);
+      return false;
+    }
+    userDataRef.current = next;
+    setUserData(next);
+    return true;
+  }
+
+  async function importLocalRecovery() {
+    if (!cloudImport || importStatus === "importing") return;
+    setImportStatus("importing");
+    try {
+      let receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope);
+      if (receipt.status === "metadata_imported" && receipt.pendingVideoIds.length) {
+        const upload = uploadLegacyVideo ?? (cloudVideoClient ? createCloudVideoService(cloudVideoClient).upload : null);
+        if (!upload) throw { code: "legacy_video_unavailable" };
+        const user = initialUserLoad.recoveryEnvelope.users[initialUserLoad.recoveryEnvelope.activeUserId];
+        const completedVideoIds = await stageLegacyImportVideos({
+          pendingVideoIds: receipt.pendingVideoIds,
+          videos: user.videoAnalyses,
+          loadBlob: loadLegacyVideoBlob,
+          upload
+        });
+        receipt = await cloudImport.import(initialUserLoad.recoveryEnvelope, completedVideoIds);
+      }
+      // Metadata import is deliberately not treated as completion: local video
+      // recovery must remain visible until the server receipt is complete.
+      setImportStatus(receipt.status === "completed" ? "completed" : "videos_pending");
+    } catch {
+      setImportStatus("failed");
+    }
+  }
+
+  async function submitQuestionnaireToCloud(submission) {
+    if (!cloudRepository || !submission) return;
+    setQuestionnaireCloudStatus("saving");
+    try {
+      await cloudRepository.submitQuestionnaire(submission);
+      pendingQuestionnaire.current = null;
+      setQuestionnaireCloudStatus("saved");
+    } catch {
+      setQuestionnaireCloudStatus("failed");
+    }
+  }
+
+  async function appendFactsToCloud(facts) {
+    if (!cloudRepository || !facts.length) return true;
+    pendingFacts.current = facts;
+    try {
+      await cloudRepository.appendFacts(facts);
+      pendingFacts.current = [];
+      return true;
+    } catch {
+      setUserDataWarning("No pudimos sincronizar tu perfil. Tus cambios quedan guardados para reintentar.");
+      return false;
+    }
+  }
+
+  async function saveAvatar() {
+    if (!avatarFile) return true;
+    if (!cloudAvatarClient || !cloudRepository) {
+      setAvatarFile(null);
+      return true;
+    }
+    setAvatarSaving(true);
+    setAvatarError("");
+    try {
+      const previousPath = avatarPathRef.current;
+      const path = await uploadAvatar(cloudAvatarClient, authUser.id, avatarFile);
+      await cloudRepository.saveAvatarPath(path);
+      avatarPathRef.current = path;
+      setAvatarPath(path);
+      setAvatarRevision((current) => current + 1);
+      if (previousPath && previousPath !== path) {
+        await removeAvatar(cloudAvatarClient, previousPath).catch(() => undefined);
+      }
+      setAvatarFile(null);
+      return true;
+    } catch {
+      setAvatarError("No pudimos guardar tu foto de perfil. Intentá nuevamente.");
+      return false;
+    } finally {
+      setAvatarSaving(false);
+    }
+  }
+
+  function handleAvatarFileChange(file) {
+    setAvatarError("");
+    setAvatarFile(file);
+  }
+
+  async function removeProfileAvatar() {
+    const previousPath = avatarPathRef.current;
+    setAvatarFile(null);
+    if (!previousPath) {
+      setAvatarUrl(null);
+      return;
+    }
+    if (!cloudAvatarClient || !cloudRepository) {
+      setAvatarError("No pudimos eliminar la foto sin conexión a la nube.");
+      return;
+    }
+    setAvatarSaving(true);
+    setAvatarError("");
+    try {
+      await cloudRepository.saveAvatarPath(null);
+      avatarPathRef.current = null;
+      setAvatarPath(null);
+      setAvatarUrl(null);
+      try {
+        await removeAvatar(cloudAvatarClient, previousPath);
+      } catch {
+        setAvatarError("La foto se eliminó del perfil, pero quedó pendiente limpiar el archivo privado.");
+      }
+    } catch {
+      setAvatarError("No pudimos eliminar tu foto de perfil. Intentá nuevamente.");
+    } finally {
+      setAvatarSaving(false);
+    }
+  }
+
+  async function saveGuidedToCloud(state) {
+    if (!cloudRepository) return;
+    const pending = pendingGuided.current || { state, idempotencyKey: makeId() };
+    pendingGuided.current = pending;
+    try {
+      await cloudRepository.saveGuidedState(pending.state, pending.idempotencyKey);
+      pendingGuided.current = null;
+    } catch {
+      setUserDataWarning("No pudimos sincronizar la sesión guiada. Tu progreso queda guardado para reintentar.");
+    }
+  }
+
   function handleCalendarDate(date) {
     if (!date) return;
     const isoDate = toIsoDate(date);
@@ -1468,33 +1776,26 @@ export default function App() {
     setActiveTab("plan");
   }
 
-  function saveProfile(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const field = (name, fallback = "") => {
-      const value = form.get(name);
-      return value === null ? fallback : String(value);
-    };
+  async function saveProfile(values) {
     const now = new Date().toISOString();
-    const values = {
-      currentGrade: field("currentGrade", state.goals.currentGrade),
-      targetGrade: field("targetGrade", state.goals.targetGrade),
-      project: field("project", state.goals.project),
-      focus: field("focus", state.goals.focus),
-      ...Object.fromEntries(profileFields.map((name) => [name, field(name, state.profile[name])]))
-    };
-    updateActiveUser((current) => {
+    let appended = [];
+    const persisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "profile-form", version: 1 }, now, makeId);
+      appended = next.facts.slice(current.facts.length);
       return {
         ...next,
         identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now }
       };
     });
+    if (!persisted) throw new Error("local_profile_persistence_failed");
+    const synced = await appendFactsToCloud(appended);
+    return synced ? undefined : { syncWarning: "Cambios guardados localmente. La sincronización quedó pendiente." };
   }
 
-  function saveQuestionnaire(payload) {
+  async function saveQuestionnaire(payload) {
     if (payload?.preventDefault) payload.preventDefault();
     const form = payload instanceof FormData ? payload : new FormData(payload.currentTarget);
+    if (!(await saveAvatar())) return;
     const now = new Date().toISOString();
     const nextProfile = buildProfileFromQuestionnaireForm(form, questionnaireProfile);
     const values = {
@@ -1505,21 +1806,44 @@ export default function App() {
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
     };
-    updateActiveUser((current) => {
+    const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      void appendFactsToCloud(next.facts.slice(current.facts.length));
       return { ...next, identity: { ...next.identity, displayName: values.name || "Usuario local", updatedAt: now } };
     });
+    if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
+    if (cloudRepository) {
+      const submission = {
+        version: QUESTIONNAIRE_VERSION,
+        answers: values,
+        idempotencyKey: makeId()
+      };
+      pendingQuestionnaire.current = submission;
+      void submitQuestionnaireToCloud(submission);
+    }
   }
 
-  function skipQuestionnaire() {
+  async function skipQuestionnaire() {
+    if (!(await saveAvatar())) return;
     const now = new Date().toISOString();
-    updateActiveUser((current) => appendChangedFacts(current, {
+    const values = {
       questionnaireCompleted: true,
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
-    }, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId));
+    };
+    const recoveryPersisted = persistActiveUser((current) => {
+      const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
+      void appendFactsToCloud(next.facts.slice(current.facts.length));
+      return next;
+    });
+    if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
+    if (cloudRepository) {
+      const submission = { version: QUESTIONNAIRE_VERSION, answers: values, idempotencyKey: makeId() };
+      pendingQuestionnaire.current = submission;
+      void submitQuestionnaireToCloud(submission);
+    }
   }
 
   function selectSession(sessionId, scroll = false) {
@@ -1537,6 +1861,7 @@ export default function App() {
   }
 
   function loadLogForSession(sessionId) {
+    setSavedRecommendation(null);
     const latest = (logsBySession.get(sessionId) || []).at(-1);
     if (!latest) {
       setLogForm(defaultLogValues);
@@ -1577,13 +1902,28 @@ export default function App() {
       notes: logForm.notes,
       ...values
     };
+    if (!persistActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }))) return;
+    if (cloudRepository) {
+      const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
+      pendingLog.current = submission;
+      void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
+        setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
+      });
+    }
     updateActiveUser((current) => ({ ...current, sessionLogs: [...current.sessionLogs, log] }));
+    setSavedRecommendation({
+      log,
+      session: selectedSession,
+      assessment: buildSessionRecommendation(log, selectedSession)
+    });
+    setLogForm(defaultLogValues);
     setLogError("");
   }
 
   function clearLogForm() {
     setLogForm(defaultLogValues);
     setLogError("");
+    setSavedRecommendation(null);
   }
 
   function handleVideoFile(event) {
@@ -1597,6 +1937,11 @@ export default function App() {
         body: "Selecciona un archivo de video compatible."
       });
       return;
+    }
+    if (pendingVideoId) {
+      deleteVideoBlob(pendingVideoId).catch(() => undefined);
+      updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.filter((video) => video.id !== pendingVideoId) }));
+      setPendingVideoId(null);
     }
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(file);
@@ -1628,7 +1973,7 @@ export default function App() {
       });
       return;
     }
-    const id = makeId();
+    const id = pendingVideoId || makeId();
     const advice = buildAdvice(videoValues, recentPain);
     try {
       await putVideo(id, videoFile);
@@ -1640,41 +1985,81 @@ export default function App() {
       });
       return;
     }
-    updateActiveUser((current) => ({
+    const recoveryPersisted = persistActiveUser((current) => current.videoAnalyses.some((video) => video.id === id) ? current : ({
       ...current,
-      videoAnalyses: [
-        ...current.videoAnalyses,
-        {
-          id,
-          createdAt: new Date().toISOString(),
-          sessionId: selectedSessionId,
-          fileName: videoMeta.name,
-          duration: videoMeta.duration,
-          size: videoMeta.size,
-          notes: videoNotes,
-          ...videoValues,
-          advice
-        }
-      ]
+      videoAnalyses: [...current.videoAnalyses, {
+        id,
+        createdAt: new Date().toISOString(),
+        sessionId: selectedSessionId,
+        fileName: videoMeta.name,
+        duration: videoMeta.duration,
+        size: videoMeta.size,
+        notes: videoNotes,
+        ...videoValues,
+        advice,
+        cloud: { id, path: videoPath(authUser.id, id, videoMeta.name), uploadStatus: "pending" }
+      }]
     }));
-    setVideoStatus({
-      tone: "ready",
-      title: "Analisis guardado",
-      body: "Quedo en el archivo local de videos y puede abrirse desde el historial."
-    });
+    if (!recoveryPersisted) {
+      setVideoStatus({ tone: "error", title: "No se pudo guardar", body: "No confirmamos la recuperación local, así que no iniciamos ninguna carga privada." });
+      return;
+    }
+    setPendingVideoId(id);
+    if (!cloudVideoClient) {
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "No hay conexión privada configurada. El archivo queda guardado localmente para recuperar o reintentar." });
+      return;
+    }
+    try {
+      const service = createCloudVideoService(cloudVideoClient);
+      const uploaded = await service.upload(videoFile, { videoId: id, durationSeconds: videoMeta.duration });
+      if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "analysis_pending" } } : video) }))) {
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El video privado se cargó, pero conservamos la recuperación local hasta guardar el estado del análisis." });
+        return;
+      }
+      await service.appendAnalysis(id, {
+        status: "completed",
+        metrics: { session_id: selectedSessionId, notes: videoNotes, foot_cuts: videoValues.footCuts, swing: videoValues.swing, hips: videoValues.hips, shoulder: videoValues.shoulder, breath: videoValues.breath, reading: videoValues.reading },
+        advice: { recommendations: advice }
+      });
+      if (!persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { id, path: uploaded.path, uploadStatus: "uploaded" } } : video) }))) {
+        setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis terminó, pero conservamos la recuperación local hasta guardar su confirmación." });
+        return;
+      }
+      await deleteVideoBlob(id);
+      setPendingVideoId(null);
+      setVideoStatus({ tone: "ready", title: "Analisis guardado", body: "El video se guardó en tu archivo privado. La copia local temporal ya se eliminó." });
+    } catch (error) {
+      const uploadStatus = error?.code === "upload_pending" ? "pending" : "analysis_pending";
+      persistActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.map((video) => video.id === id ? { ...video, cloud: { ...(video.cloud || { id, path: videoPath(authUser.id, id, videoMeta.name) }), uploadStatus } } : video) }));
+      setVideoStatus({ tone: "error", title: "Carga pendiente", body: "El análisis y el archivo siguen guardados localmente. Puedes volver a intentar sin perder el video." });
+    }
   }
 
   async function openSavedVideo(id) {
     const blob = await getVideo(id);
-    if (!blob) {
-      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "El archivo no esta en IndexedDB." });
+    if (blob) {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(URL.createObjectURL(blob));
+      setVideoFile(null);
+      setActiveTab("video");
+      setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde el reproductor." });
       return;
     }
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setVideoUrl(URL.createObjectURL(blob));
-    setVideoFile(null);
-    setActiveTab("video");
-    setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde el reproductor." });
+    const saved = activeUser.videoAnalyses.find((video) => video.id === id);
+    if (!cloudVideoClient || !saved) {
+      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
+      return;
+    }
+    try {
+      const signedUrl = await createCloudVideoService(cloudVideoClient).playbackUrl(saved.cloud?.id || id);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoUrl(signedUrl);
+      setVideoFile(null);
+      setActiveTab("video");
+      setVideoStatus({ tone: "ready", title: "Video abierto", body: "Revisa el clip desde un enlace privado temporal." });
+    } catch {
+      setVideoStatus({ tone: "error", title: "Video no encontrado", body: "No pudimos recuperar el archivo privado." });
+    }
   }
 
   async function removeVideo(id) {
@@ -1694,32 +2079,28 @@ export default function App() {
 
   async function resetData() {
     try {
-      await clearVideoBlobs();
+      await deleteVideoBlobs(activeUser.videoAnalyses.map((video) => video.id));
     } catch {
       setUserDataWarning("No pudimos borrar los videos locales. Tus datos no se modificaron.");
       return;
     }
     const now = new Date().toISOString();
-    const fresh = migrateLegacyUserData({
-      tracker: cloneData(defaultState),
-      guided: { schemaVersion: 1, activeRun: null, history: [] },
-      now,
-      makeId
-    });
-    const next = { ...fresh, migration: { migratedFrom: null, migratedAt: null } };
+    const next = resetAuthenticatedUser(userData, authUser, { now, makeId });
     userDataRef.current = next;
     setUserData(next);
     setQuestionnaireOpen(true);
     setLogForm(defaultLogValues);
+    setSavedRecommendation(null);
     setVideoFile(null);
     setVideoUrl("");
     setVideoMeta(null);
+    setPendingVideoId(null);
     setVideoValues(defaultVideoValues);
     setVideoNotes("");
     setVideoStatus({
       tone: "muted",
       title: "Listo para analizar",
-      body: "Sube un clip MP4, MOV o WebM. El analisis queda guardado localmente."
+      body: "Sube un clip MP4, MOV o WebM. Conservamos una copia local hasta verificar la carga privada."
     });
   }
 
@@ -1741,10 +2122,31 @@ export default function App() {
               setActiveWeek={setActiveWeek}
               risk={risk}
               goals={state.goals}
+              profile={state.profile}
+              avatarUrl={avatarUrl}
               theme={theme}
               onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+              accountEmail={authUser.email}
+              onSignOut={onSignOut}
+              authError={authError}
+              signingOut={signingOut}
             />
             <SidebarInset className="min-w-0 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-0">
+              {importStatus !== "idle" && importStatus !== "completed" ? (
+                <div role={importStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <div>
+                    <p className="font-medium">{importStatus === "failed" ? "No pudimos importar tus datos" : importStatus === "importing" ? "Importando datos locales…" : importStatus === "videos_pending" ? "Importación de videos pendiente" : "Importación pendiente"}</p>
+                    <p className="text-muted-foreground">Tu copia local se conserva hasta que el recibo de la nube confirme la importación completa.</p>
+                  </div>
+                  {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : importStatus === "videos_pending" ? "Reintentar videos" : "Importar datos locales"}</Button> : null}
+                </div>
+              ) : null}
+              {questionnaireCloudStatus === "saving" || questionnaireCloudStatus === "failed" ? (
+                <div role={questionnaireCloudStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <p>{questionnaireCloudStatus === "saving" ? "Guardando cuestionario en la nube…" : "No pudimos guardar el cuestionario en la nube. Tus respuestas siguen disponibles para reintentar."}</p>
+                  {questionnaireCloudStatus === "failed" ? <Button type="button" variant="outline" onClick={() => void submitQuestionnaireToCloud(pendingQuestionnaire.current)}>Reintentar cuestionario</Button> : null}
+                </div>
+              ) : null}
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-auto" />
@@ -2265,6 +2667,24 @@ export default function App() {
                 <CardDescription>Guarda carga, dolor, link y notas tecnicas.</CardDescription>
               </CardHeader>
               <CardContent>
+                {savedRecommendation ? (
+                  <div className="space-y-5 rounded-xl border border-primary/30 bg-primary/5 p-5">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="mt-0.5 size-6 shrink-0 text-primary" />
+                      <div>
+                        <h3 className="font-semibold">Log guardado</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Tus datos se guardaron y el formulario quedó listo para una nueva sesión.
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-sm font-medium">¿Qué quieres hacer ahora?</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" onClick={clearLogForm}>Registrar otra sesión</Button>
+                      <Button type="button" variant="outline" onClick={() => setActiveTab("dashboard")}>Continuar</Button>
+                    </div>
+                  </div>
+                ) : (
                 <form className="space-y-4" onSubmit={submitLog}>
                   <Field label="Dia del plan" htmlFor="log-session" help={logFieldHelp.session}>
                     <SessionSelect
@@ -2343,51 +2763,48 @@ export default function App() {
                       <Save className="size-4" />
                       Guardar log
                     </Button>
-                    <Button type="button" variant="outline" onClick={clearLogForm}>
-                      <RefreshCcw className="size-4" />
-                      Limpiar
-                    </Button>
                   </div>
                 </form>
+                )}
               </CardContent>
             </Card>
 
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
-                <CardTitle>Historial</CardTitle>
-                <CardDescription>Ultimas sesiones cargadas.</CardDescription>
+                <CardTitle>Evaluación de tu sesión</CardTitle>
+                <CardDescription>Recomendación IA según el objetivo planificado y tu registro.</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[34rem] pr-3">
-                  <div className="space-y-3">
-                    {!state.logs.length ? (
-                      <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                        Sin logs todavia.
+                {savedRecommendation ? (
+                  <div className="space-y-5" aria-live="polite">
+                    <div className="flex items-center gap-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+                      <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground">
+                        {savedRecommendation.assessment.score}/10
                       </div>
-                    ) : (
-                      [...state.logs].reverse().map((log) => {
-                        const session = sessionById(log.sessionId);
-                        return (
-                          <article key={log.id} className="rounded-lg border border-border/70 bg-background/50 p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <h3 className="font-medium">{session.title.replace("Escalada ", "")}</h3>
-                                <p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString("es-AR")}</p>
-                              </div>
-                              <Badge variant="outline">RPE {log.rpe}</Badge>
-                            </div>
-                            <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-                              <span>Link {log.bestLink}</span>
-                              <span>Dolor {log.pain}</span>
-                              <span>Pies {log.footCuts}</span>
-                            </div>
-                            {log.notes ? <p className="mt-2 text-sm text-muted-foreground">{log.notes}</p> : null}
-                          </article>
-                        );
-                      })
-                    )}
+                      <div>
+                        <p className="font-semibold">{savedRecommendation.session.title.replace("Escalada ", "")}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">{savedRecommendation.assessment.summary}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">En qué enfocarte</h3>
+                      <div className="mt-3 space-y-3">
+                        {savedRecommendation.assessment.recommendations.map((recommendation, index) => (
+                          <div key={recommendation} className="flex gap-3 rounded-lg border border-border/70 bg-background/50 p-3 text-sm">
+                            <Badge className="mt-0.5 size-6 shrink-0 justify-center rounded-full p-0" variant="outline">{index + 1}</Badge>
+                            <p>{recommendation}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                </ScrollArea>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border p-6 text-center">
+                    <Gauge className="mx-auto size-8 text-primary" />
+                    <p className="mt-3 font-medium">Guarda una sesión para recibir tu evaluación</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Compararemos carga, resultado, técnica, dolor y recuperación con el objetivo del día.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </section>
@@ -2489,7 +2906,7 @@ export default function App() {
                     <div className="flex flex-wrap gap-2">
                       <Button type="submit" disabled={!videoFile || !videoMeta}>
                         <Save className="size-4" />
-                        Guardar analisis
+                        {pendingVideoId ? "Reintentar carga" : "Guardar analisis"}
                       </Button>
                       <Button type="button" variant="outline" onClick={() => setVideoValues(defaultVideoValues)}>
                         <RefreshCcw className="size-4" />
@@ -2599,6 +3016,35 @@ export default function App() {
         </TabsContent>
 
         <TabsContent value="profile" className="mt-0">
+          <UserProfile
+            profile={state.profile}
+            goals={state.goals}
+            logs={state.logs}
+            planProgress={completionPercent}
+            avatarFile={avatarFile}
+            avatarUrl={avatarUrl}
+            avatarError={avatarError}
+            avatarSaving={avatarSaving}
+            avatarDisabled={!cloudAvatarClient || !cloudRepository}
+            onAvatarFileChange={handleAvatarFileChange}
+            onSaveAvatar={saveAvatar}
+            onRemoveAvatar={removeProfileAvatar}
+            onSave={saveProfile}
+            email={authUser.email || ""}
+            exportJson={exportJson}
+            theme={theme}
+            onCopyJson={() => void navigator.clipboard?.writeText(exportJson)}
+            onDownloadJson={downloadJson}
+            onReset={() => void resetData()}
+            onSignOut={onSignOut}
+            onOpenQuestionnaire={() => setQuestionnaireOpen(true)}
+            onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            signingOut={signingOut}
+            authError={authError || ""}
+          />
+        </TabsContent>
+
+        <TabsContent value="legacy-profile" className="mt-0">
           <section id="profile" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
@@ -2630,6 +3076,12 @@ export default function App() {
                 </div>
 
                 <form key={state.profile.questionnaireCompletedAt || "profile-form"} className="space-y-5" onSubmit={saveProfile}>
+                  <section className="space-y-3">
+                    <h3 className="font-semibold">Foto de perfil</h3>
+                    <ProfilePhotoPicker file={avatarFile} currentUrl={avatarUrl} onFileChange={handleAvatarFileChange} disabled={avatarSaving || !cloudAvatarClient || !cloudRepository} />
+                    {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
+                    {avatarFile ? <Button type="button" variant="outline" disabled={avatarSaving} onClick={() => void saveAvatar()}>{avatarSaving ? "Guardando foto…" : "Guardar foto"}</Button> : null}
+                  </section>
                   <section className="space-y-3">
                     <div>
                       <h3 className="font-semibold">Objetivos del bloque</h3>
@@ -2745,6 +3197,17 @@ export default function App() {
                   <CardDescription>Copia o descarga todos los datos del usuario activo.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/45 p-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Cuenta Supabase</p>
+                      <p className="truncate text-sm font-medium">{authUser.email || "Cuenta Supabase"}</p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={onSignOut} disabled={signingOut}>
+                      <LogOut className="size-4" />
+                      {signingOut ? "Cerrando…" : "Cerrar sesión"}
+                    </Button>
+                    {authError ? <p role="alert" className="w-full text-xs text-destructive">{authError}</p> : null}
+                  </div>
                   <Alert role="note" className="border-amber-500/30 bg-amber-500/5">
                     <ShieldAlert className="size-4" />
                     <AlertTitle>Archivo sensible</AlertTitle>
@@ -2825,8 +3288,8 @@ export default function App() {
         </TabsContent>
               </div>
 
-              <TabsList className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 grid w-auto grid-cols-5 rounded-xl border border-border bg-card/95 p-1 shadow-2xl group-data-horizontal/tabs:h-16 supports-[backdrop-filter]:backdrop-blur md:hidden">
-                {tabs.map(({ value, label, icon: Icon }) => (
+              <TabsList className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 grid w-auto grid-cols-4 rounded-xl border border-border bg-card/95 p-1 shadow-2xl group-data-horizontal/tabs:h-16 supports-[backdrop-filter]:backdrop-blur md:hidden">
+                {primaryTabs.map(({ value, label, icon: Icon }) => (
                   <TabsTrigger
                     key={value}
                     value={value}
@@ -2847,6 +3310,12 @@ export default function App() {
             completion={questionnaireCompletion}
             onSubmit={saveQuestionnaire}
             onSkip={skipQuestionnaire}
+            avatarFile={avatarFile}
+            onAvatarFileChange={handleAvatarFileChange}
+            avatarUrl={avatarUrl}
+            avatarError={avatarError}
+            avatarSaving={avatarSaving}
+            avatarStorageAvailable={Boolean(cloudAvatarClient && cloudRepository)}
             theme={theme}
             onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           />

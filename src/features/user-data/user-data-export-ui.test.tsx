@@ -17,13 +17,13 @@ describe("user data export UI", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getAllByRole("tab", { name: "Perfil" })[0]);
-    expect(await screen.findByText("Archivo sensible")).toBeInTheDocument();
-    expect(screen.getByText(/Usuario activo:/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    await user.click(await screen.findByRole("tab", { name: "Cuenta" }));
+    expect(screen.getByText("Respaldo de datos")).toBeInTheDocument();
+    expect(screen.getByText(/incluye perfil, sesiones y análisis/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Ver JSON" }));
     const exported = JSON.parse((screen.getByLabelText("JSON exportado del tracker") as HTMLTextAreaElement).value);
-    expect(exported.schemaVersion).toBe(2);
+    expect(exported.schemaVersion).toBe(3);
     expect(exported.users[exported.activeUserId].facts.length).toBeGreaterThan(0);
     expect(exported).not.toHaveProperty("plan");
     expect(exported.app.exportedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

@@ -19,7 +19,13 @@ function guidedState(state: GuidedSessionState): GuidedSessionState {
 
 function cleanUser(user: UserRecord): UserRecord {
   return {
-    identity: { id: user.identity.id, displayName: user.identity.displayName, createdAt: user.identity.createdAt, updatedAt: user.identity.updatedAt },
+    identity: {
+      id: user.identity.id,
+      displayName: user.identity.displayName,
+      createdAt: user.identity.createdAt,
+      updatedAt: user.identity.updatedAt,
+      auth: user.identity.auth ? { ...user.identity.auth } : null
+    },
     facts: user.facts.map((fact) => ({
       id: fact.id, userId: fact.userId, category: fact.category, key: fact.key, value: Array.isArray(fact.value) ? [...fact.value] : fact.value,
       unit: fact.unit, recordedAt: fact.recordedAt, source: { type: fact.source.type, field: fact.source.field, version: fact.source.version }, supersedes: fact.supersedes
@@ -31,19 +37,27 @@ function cleanUser(user: UserRecord): UserRecord {
     videoAnalyses: user.videoAnalyses.map((video) => ({
       id: video.id, sessionId: video.sessionId, createdAt: video.createdAt, fileName: video.fileName, duration: video.duration, size: video.size,
       notes: video.notes, footCuts: video.footCuts, swing: video.swing, hips: video.hips, shoulder: video.shoulder, breath: video.breath, reading: video.reading,
-      advice: Array.isArray(video.advice) ? video.advice.map(({ title, body }) => ({ title, body })) : []
+      advice: Array.isArray(video.advice) ? video.advice.map(({ title, body }) => ({ title, body })) : [],
+      ...(video.cloud ? { cloud: { ...video.cloud } } : {})
     })),
     guidedSessions: guidedState(user.guidedSessions)
   };
 }
 
-export function buildUserDataExport(envelope: UserDataEnvelope, exportedAt: string): string {
-  const users = Object.fromEntries(Object.keys(envelope.users).sort().map((id) => [id, cleanUser(envelope.users[id])]));
-  return JSON.stringify({
-    schemaVersion: 2,
+/** The recoverable, binary-free payload accepted by the cloud import boundary. */
+export function buildLocalImportEnvelope(envelope: UserDataEnvelope): UserDataEnvelope {
+  return {
+    schemaVersion: 3,
     activeUserId: envelope.activeUserId,
-    users,
-    migration: { migratedFrom: envelope.migration.migratedFrom, migratedAt: envelope.migration.migratedAt },
+    users: Object.fromEntries(Object.keys(envelope.users).sort().map((id) => [id, cleanUser(envelope.users[id])])),
+    migration: { migratedFrom: envelope.migration.migratedFrom, migratedAt: envelope.migration.migratedAt }
+  };
+}
+
+export function buildUserDataExport(envelope: UserDataEnvelope, exportedAt: string): string {
+  const local = buildLocalImportEnvelope(envelope);
+  return JSON.stringify({
+    ...local,
     app: { name: APP_NAME, exportedAt, planVersion: PLAN_VERSION }
   }, null, 2);
 }

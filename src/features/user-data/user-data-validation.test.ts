@@ -13,11 +13,11 @@ function fact(userId: string, id: string, key = "name", supersedes: string | nul
 }
 
 function user(id: string): UserRecord {
-  return { identity: { id, displayName: id, createdAt: at, updatedAt: at }, facts: [fact(id, `${id}-fact`)], sessionLogs: [], videoAnalyses: [], guidedSessions: emptyGuidedSessionState() };
+  return { identity: { id, displayName: id, createdAt: at, updatedAt: at, auth: null }, facts: [fact(id, `${id}-fact`)], sessionLogs: [], videoAnalyses: [], guidedSessions: emptyGuidedSessionState() };
 }
 
 function envelope(): UserDataEnvelope {
-  return { schemaVersion: 2, activeUserId: "u1", users: { u1: user("u1"), u2: user("u2") }, migration: { migratedFrom: "climb4w.state.v1", migratedAt: at } };
+  return { schemaVersion: 3, activeUserId: "u1", users: { u1: user("u1"), u2: user("u2") }, migration: { migratedFrom: "climb4w.state.v1", migratedAt: at } };
 }
 
 describe("user data envelope validation", () => {

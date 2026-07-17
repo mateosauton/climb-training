@@ -33,11 +33,18 @@ export type UserFact = {
   supersedes: string | null;
 };
 
+export type UserAuthIdentity = {
+  provider: "supabase";
+  subject: string;
+  email: string | null;
+};
+
 export type UserIdentity = {
   id: string;
   displayName: string;
   createdAt: string;
   updatedAt: string;
+  auth: UserAuthIdentity | null;
 };
 
 export type UserRecord = {
@@ -49,11 +56,11 @@ export type UserRecord = {
 };
 
 export type UserDataEnvelope = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   activeUserId: string;
   users: Record<string, UserRecord>;
   migration: {
-    migratedFrom: "climb4w.state.v1" | null;
+    migratedFrom: "climb4w.state.v1" | "climb4w.users.v2" | null;
     migratedAt: string | null;
   };
 };
@@ -69,5 +76,7 @@ export type UserDataLoadResult = {
   envelope: UserDataEnvelope;
   warning: string | null;
   migrated: boolean;
+  /** A pre-existing valid local envelope is available for cloud recovery/import. */
+  hasRecoveryEnvelope: boolean;
   canPersist: boolean;
 };
