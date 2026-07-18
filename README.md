@@ -29,11 +29,14 @@ La app usa Supabase Auth para registrar usuarios, confirmar su correo, iniciar s
    ```
 
 3. En **Supabase → Authentication → Sign In / Providers → Email**, deja habilitado Email y decide si el proyecto exige confirmación de correo. Los proyectos alojados la exigen por defecto.
-4. En **Supabase → Authentication → URL Configuration**, configura `https://climb-training-lilac.vercel.app/escalada/` como **Site URL** y agrega estas URLs de retorno permitidas:
+4. En **Supabase → Authentication → URL Configuration**, configura `https://climbing.mateosauton.com/escalada/` como **Site URL** y agrega estas URLs de retorno permitidas:
 
    ```text
    http://127.0.0.1:8765/escalada/
+   http://localhost:8765/escalada/
    https://climb-training-lilac.vercel.app/escalada/
+   https://climbing.mateosauton.com/escalada/
+   https://*-mateo-sautons-projects.vercel.app/**
    ```
 
 5. Configura las dos variables `VITE_` en el entorno de producción/preview y vuelve a desplegar. Nunca uses una clave `service_role` o secreta en esta app cliente.
