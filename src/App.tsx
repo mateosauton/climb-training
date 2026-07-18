@@ -1791,7 +1791,7 @@ export default function App({
   async function saveQuestionnaire(payload) {
     if (payload?.preventDefault) payload.preventDefault();
     const form = payload instanceof FormData ? payload : new FormData(payload.currentTarget);
-    if (!(await saveAvatar())) return;
+    await saveAvatar();
     const now = new Date().toISOString();
     const nextProfile = buildProfileFromQuestionnaireForm(form, questionnaireProfile);
     const values = {
@@ -1821,7 +1821,7 @@ export default function App({
   }
 
   async function skipQuestionnaire() {
-    if (!(await saveAvatar())) return;
+    await saveAvatar();
     const now = new Date().toISOString();
     const values = {
       questionnaireCompleted: true,
