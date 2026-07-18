@@ -14,7 +14,7 @@ export type AuthSession = {
 } | null;
 
 export type AuthEvent = AuthChangeEvent;
-export type AuthFailure = "invalid_credentials" | "weak_password" | "rate_limit" | "expired_link" | "unknown";
+export type AuthFailure = "invalid_credentials" | "weak_password" | "email_rate_limit" | "rate_limit" | "expired_link" | "unknown";
 export type AuthActionResult = { error: AuthFailure | null };
 export type AuthSessionResult = AuthActionResult & { session: AuthSession };
 
@@ -34,6 +34,7 @@ function toSession(session: Session | null): AuthSession {
 
 function toFailure(error: AuthError | null): AuthFailure | null {
   if (!error) return null;
+  if (error.code === "over_email_send_rate_limit") return "email_rate_limit";
   if (error.status === 429 || error.code?.includes("rate_limit")) return "rate_limit";
   if (error.code === "invalid_credentials" || error.code === "email_not_confirmed") return "invalid_credentials";
   if (error.code === "weak_password") return "weak_password";

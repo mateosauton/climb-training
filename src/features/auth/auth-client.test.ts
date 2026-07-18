@@ -87,7 +87,8 @@ describe("createSupabaseAuthClient", () => {
   it.each([
     ["invalid_credentials", 400, "invalid_credentials"],
     ["weak_password", 422, "weak_password"],
-    ["over_email_send_rate_limit", 429, "rate_limit"],
+    ["over_email_send_rate_limit", 429, "email_rate_limit"],
+    ["over_request_rate_limit", 429, "rate_limit"],
     ["otp_expired", 403, "expired_link"],
     ["unexpected", 500, "unknown"]
   ])("sanitizes %s failures", async (code, status, expected) => {

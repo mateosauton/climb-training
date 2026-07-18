@@ -114,6 +114,18 @@ describe("AuthProvider", () => {
     expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
   });
 
+  it("keeps password reset non-enumerating when email delivery is rate limited", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.requestPasswordReset).mockResolvedValue({ error: "email_rate_limit" });
+    renderProvider(auth);
+    await waitFor(() => expect(screen.getByLabelText("auth-state")).toHaveTextContent('"loading":false'));
+
+    await userEvent.click(screen.getByRole("button", { name: "reset" }));
+
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
+    expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("límite temporal");
+  });
+
   it("enters recovery mode and exits after updating the password", async () => {
     const auth = fakeClient();
     renderProvider(auth);
@@ -137,6 +149,17 @@ describe("AuthProvider", () => {
 
     expect(screen.getByLabelText("auth-state")).toHaveTextContent("El correo o la contraseña no son correctos");
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("invalid_credentials");
+  });
+
+  it("explains when the confirmation email service is temporarily full", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.signUp).mockResolvedValue({ session: null, error: "email_rate_limit" });
+    renderProvider(auth);
+    await waitFor(() => expect(screen.getByLabelText("auth-state")).toHaveTextContent('"loading":false'));
+
+    await userEvent.click(screen.getByRole("button", { name: "sign up" }));
+
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("El servicio de correo alcanzó su límite temporal");
   });
 
   it("ignores a repeated action while the first is pending", async () => {
