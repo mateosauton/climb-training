@@ -187,7 +187,7 @@ describe("cloud-primary app integration", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
-  it("uploads and saves the avatar before closing onboarding, and stays open on failure", async () => {
+  it("uploads and saves the avatar before closing onboarding, and keeps onboarding unblocked on failure", async () => {
     const saveAvatarPath = vi.fn(async () => undefined);
     const cloud = { ...repository(vi.fn(async () => undefined)), saveAvatarPath };
     let finishUpload: ((value: { data: unknown; error: null }) => void) | undefined;
@@ -214,12 +214,11 @@ describe("cloud-primary app integration", () => {
     fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos guardar tu foto");
-    const dialogs = screen.getAllByRole("dialog");
-    expect(dialogs[dialogs.length - 1]).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^1\./ }));
-    fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["new"], "replacement.png", { type: "image/png" })] } });
-    expect(screen.queryByText("No pudimos guardar tu foto de perfil. Intentá nuevamente.")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(saveAvatarPath).toHaveBeenCalledTimes(1);
+    const envelope = JSON.parse(localStorage.getItem(USER_DATA_STORAGE_KEY) || "null");
+    const facts = envelope.users[envelope.activeUserId].facts as Array<{ key: string; value: unknown }>;
+    expect(facts.some((fact) => fact.key === "questionnaireCompleted" && fact.value === true)).toBe(true);
   }, 10_000);
 
   it("refreshes the signed URL after replacing an avatar at the same path", async () => {
