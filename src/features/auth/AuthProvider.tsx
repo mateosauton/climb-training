@@ -149,6 +149,10 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     try {
       const result = await client.requestPasswordReset(email, redirectTo);
       if (result.error) {
+        if (result.error === "email_rate_limit") {
+          setNotice("Si existe una cuenta, recibirás un enlace para cambiar tu contraseña.");
+          return true;
+        }
         setError(failureMessage(result.error, "No pudimos enviar el enlace. Intenta de nuevo."));
         return false;
       }

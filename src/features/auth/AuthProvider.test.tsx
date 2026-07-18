@@ -114,6 +114,18 @@ describe("AuthProvider", () => {
     expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
   });
 
+  it("keeps password reset non-enumerating when email delivery is rate limited", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.requestPasswordReset).mockResolvedValue({ error: "email_rate_limit" });
+    renderProvider(auth);
+    await waitFor(() => expect(screen.getByLabelText("auth-state")).toHaveTextContent('"loading":false'));
+
+    await userEvent.click(screen.getByRole("button", { name: "reset" }));
+
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
+    expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("límite temporal");
+  });
+
   it("enters recovery mode and exits after updating the password", async () => {
     const auth = fakeClient();
     renderProvider(auth);
