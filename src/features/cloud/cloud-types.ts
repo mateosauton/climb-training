@@ -1,6 +1,7 @@
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 export type QuestionnaireSubmissionInput = {
+  id: string;
   version: number;
   answers: Record<string, JsonValue>;
   idempotencyKey: string;

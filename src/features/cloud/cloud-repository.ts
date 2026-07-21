@@ -48,7 +48,7 @@ export type CloudRepository = {
   ensureProfile(): Promise<void>;
   hydrate(): Promise<CloudHydration>;
   saveAvatarPath(path: string | null): Promise<void>;
-  submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
+  submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<string>;
   appendFacts(facts: FactWrite[]): Promise<void>;
   saveGuidedState(state: JsonValue, idempotencyKey: string): Promise<void>;
   generatePlan?(input: PlanGenerationInput): Promise<PlanGenerationJob>;
@@ -100,9 +100,10 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       await athleteId(client);
       await requireSuccess(client.rpc("update_avatar_path", { p_avatar_path: path }));
     },
-    async submitQuestionnaire({ version, answers, idempotencyKey }) {
+    async submitQuestionnaire({ id: questionnaireId, version, answers, idempotencyKey }) {
       const id = await athleteId(client);
       await requireSuccess(client.from("questionnaire_submissions").upsert({
+        id: questionnaireId,
         athlete_id: id,
         answers,
         idempotency_key: idempotencyKey,
@@ -111,6 +112,7 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         onConflict: "athlete_id,idempotency_key",
         ignoreDuplicates: true
       }));
+      return questionnaireId;
     },
     async appendFacts(facts) {
       if (!facts.length) return;

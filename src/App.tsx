@@ -831,7 +831,7 @@ function createQuestionnaireFormData(draft) {
   return form;
 }
 
-function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
+function ProfileQuestionnaire({ profile, completion, onSubmit, cloudStatus, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState(() => ({ ...profile }));
   const currentSection = QUESTIONNAIRE_SECTIONS[stepIndex];
@@ -916,6 +916,8 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                 </section>
               ) : null}
               {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
+              {cloudStatus === "saving" ? <p role="status" className="text-sm text-muted-foreground">Guardando tu cuestionario…</p> : null}
+              {cloudStatus === "failed" ? <p role="alert" className="text-sm text-destructive">No pudimos guardar el cuestionario en la nube. Intentá nuevamente.</p> : null}
               <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold">{currentSection.title}</h3>
@@ -934,19 +936,16 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                 </div>
               </section>
               <div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" disabled={avatarSaving} onClick={onSkip}>
-                  Completar mas tarde
-                </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={stepIndex === 0}
+                  disabled={stepIndex === 0 || avatarSaving || cloudStatus === "saving"}
                   onClick={() => setStepIndex((current) => Math.max(0, current - 1))}
                 >
                   <ChevronLeft className="size-4" />
                   Atras
                 </Button>
-                <Button type="submit" disabled={avatarSaving}>
+                <Button type="submit" disabled={avatarSaving || cloudStatus === "saving"}>
                   {isLastStep ? <Save className="size-4" /> : <ChevronRight className="size-4" />}
                   {avatarSaving ? "Guardando foto…" : isLastStep ? "Guardar cuestionario" : "Siguiente"}
                 </Button>
@@ -1354,6 +1353,7 @@ export default function App({
   const [avatarError, setAvatarError] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
   const pendingQuestionnaire = useRef(null);
+  const pendingPlanGeneration = useRef(null);
   const pendingFacts = useRef([]);
   const pendingLog = useRef(null);
   const pendingGuided = useRef(null);
@@ -1663,15 +1663,36 @@ export default function App({
   }
 
   async function submitQuestionnaireToCloud(submission) {
-    if (!cloudRepository || !submission) return;
+    if (!cloudRepository || !submission) return null;
     setQuestionnaireCloudStatus("saving");
     try {
-      await cloudRepository.submitQuestionnaire(submission);
+      const questionnaireId = await cloudRepository.submitQuestionnaire(submission);
       pendingQuestionnaire.current = null;
-      setQuestionnaireCloudStatus("saved");
+      return questionnaireId;
     } catch {
       setQuestionnaireCloudStatus("failed");
+      return null;
     }
+  }
+
+  async function generateQuestionnairePlan(generation) {
+    if (!cloudRepository?.generatePlan || !generation) {
+      setQuestionnaireCloudStatus("generation_failed");
+      return;
+    }
+    setQuestionnaireCloudStatus("generating");
+    try {
+      const job = await cloudRepository.generatePlan(generation);
+      if (job.status !== "published") throw new Error("plan_generation_failed");
+      pendingPlanGeneration.current = null;
+      setQuestionnaireCloudStatus("published");
+    } catch {
+      setQuestionnaireCloudStatus("generation_failed");
+    }
+  }
+
+  async function retryQuestionnaireGeneration() {
+    await generateQuestionnairePlan(pendingPlanGeneration.current);
   }
 
   async function appendFactsToCloud(facts) {
@@ -1802,6 +1823,19 @@ export default function App({
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
     };
+    let generation = null;
+    if (cloudRepository) {
+      const submission = {
+        id: makeId(),
+        version: QUESTIONNAIRE_VERSION,
+        answers: values,
+        idempotencyKey: makeId()
+      };
+      pendingQuestionnaire.current = submission;
+      const questionnaireId = await submitQuestionnaireToCloud(submission);
+      if (!questionnaireId) return;
+      generation = { questionnaireId, idempotencyKey: makeId() };
+    }
     const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
       void appendFactsToCloud(next.facts.slice(current.facts.length));
@@ -1809,36 +1843,9 @@ export default function App({
     });
     if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
-    if (cloudRepository) {
-      const submission = {
-        version: QUESTIONNAIRE_VERSION,
-        answers: values,
-        idempotencyKey: makeId()
-      };
-      pendingQuestionnaire.current = submission;
-      void submitQuestionnaireToCloud(submission);
-    }
-  }
-
-  async function skipQuestionnaire() {
-    if (!(await saveAvatar())) return;
-    const now = new Date().toISOString();
-    const values = {
-      questionnaireCompleted: true,
-      questionnaireCompletedAt: now,
-      questionnaireVersion: QUESTIONNAIRE_VERSION
-    };
-    const recoveryPersisted = persistActiveUser((current) => {
-      const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
-      void appendFactsToCloud(next.facts.slice(current.facts.length));
-      return next;
-    });
-    if (!recoveryPersisted) return;
-    setQuestionnaireOpen(false);
-    if (cloudRepository) {
-      const submission = { version: QUESTIONNAIRE_VERSION, answers: values, idempotencyKey: makeId() };
-      pendingQuestionnaire.current = submission;
-      void submitQuestionnaireToCloud(submission);
+    if (generation) {
+      pendingPlanGeneration.current = generation;
+      void generateQuestionnairePlan(generation);
     }
   }
 
@@ -2154,10 +2161,18 @@ export default function App({
                   {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : importStatus === "videos_pending" ? "Reintentar videos" : "Importar datos locales"}</Button> : null}
                 </div>
               ) : null}
-              {questionnaireCloudStatus === "saving" || questionnaireCloudStatus === "failed" ? (
-                <div role={questionnaireCloudStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
-                  <p>{questionnaireCloudStatus === "saving" ? "Guardando cuestionario en la nube…" : "No pudimos guardar el cuestionario en la nube. Tus respuestas siguen disponibles para reintentar."}</p>
-                  {questionnaireCloudStatus === "failed" ? <Button type="button" variant="outline" onClick={() => void submitQuestionnaireToCloud(pendingQuestionnaire.current)}>Reintentar cuestionario</Button> : null}
+              {questionnaireCloudStatus !== "idle" ? (
+                <div role={questionnaireCloudStatus === "failed" || questionnaireCloudStatus === "generation_failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <p>{questionnaireCloudStatus === "saving"
+                    ? "Guardando tu cuestionario…"
+                    : questionnaireCloudStatus === "generating"
+                      ? "Generando tu plan…"
+                      : questionnaireCloudStatus === "published"
+                        ? "Tu plan está listo."
+                        : questionnaireCloudStatus === "generation_failed"
+                          ? "No pudimos generar tu plan. Intentá nuevamente."
+                          : "No pudimos guardar el cuestionario en la nube. Intentá nuevamente."}</p>
+                  {questionnaireCloudStatus === "generation_failed" ? <Button type="button" variant="outline" onClick={() => void retryQuestionnaireGeneration()}>Reintentar generación</Button> : null}
                 </div>
               ) : null}
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
@@ -3322,7 +3337,7 @@ export default function App({
             profile={questionnaireProfile}
             completion={questionnaireCompletion}
             onSubmit={saveQuestionnaire}
-            onSkip={skipQuestionnaire}
+            cloudStatus={questionnaireCloudStatus}
             avatarFile={avatarFile}
             onAvatarFileChange={handleAvatarFileChange}
             avatarUrl={avatarUrl}
