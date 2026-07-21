@@ -1812,7 +1812,7 @@ export default function App({
   async function saveQuestionnaire(payload) {
     if (payload?.preventDefault) payload.preventDefault();
     const form = payload instanceof FormData ? payload : new FormData(payload.currentTarget);
-    if (!(await saveAvatar())) return;
+    await saveAvatar();
     const now = new Date().toISOString();
     const nextProfile = buildProfileFromQuestionnaireForm(form, questionnaireProfile);
     const values = {
@@ -1836,6 +1836,16 @@ export default function App({
       if (!questionnaireId) return;
       generation = { questionnaireId, idempotencyKey: makeId() };
     }
+  }
+
+  async function skipQuestionnaire() {
+    await saveAvatar();
+    const now = new Date().toISOString();
+    const values = {
+      questionnaireCompleted: true,
+      questionnaireCompletedAt: now,
+      questionnaireVersion: QUESTIONNAIRE_VERSION
+    };
     const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
       void appendFactsToCloud(next.facts.slice(current.facts.length));
