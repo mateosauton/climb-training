@@ -22,6 +22,7 @@ export interface AuthClient {
   getSession(): Promise<AuthSessionResult>;
   onAuthStateChange(callback: (event: AuthEvent, session: AuthSession) => void): () => void;
   signUp(email: string, password: string, redirectTo: string): Promise<AuthSessionResult>;
+  verifyEmailCode(email: string, code: string): Promise<AuthSessionResult>;
   signIn(email: string, password: string): Promise<AuthSessionResult>;
   requestPasswordReset(email: string, redirectTo: string): Promise<AuthActionResult>;
   updatePassword(password: string): Promise<AuthActionResult>;
@@ -59,6 +60,10 @@ export function createSupabaseAuthClient(config: AuthConfig): AuthClient {
         password,
         options: { emailRedirectTo: redirectTo }
       });
+      return { session: toSession(data.session), error: toFailure(error) };
+    },
+    async verifyEmailCode(email, code) {
+      const { data, error } = await client.auth.verifyOtp({ email, token: code, type: "email" });
       return { session: toSession(data.session), error: toFailure(error) };
     },
     async signIn(email, password) {

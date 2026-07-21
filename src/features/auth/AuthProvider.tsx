@@ -10,8 +10,10 @@ type AuthContextValue = {
   notice: string | null;
   busy: boolean;
   recoveryMode: boolean;
+  pendingVerificationEmail: string | null;
   signIn: (email: string, password: string) => Promise<boolean>;
   signUp: (email: string, password: string) => Promise<boolean>;
+  verifyEmailCode: (email: string, code: string) => Promise<boolean>;
   requestPasswordReset: (email: string) => Promise<boolean>;
   updatePassword: (password: string) => Promise<boolean>;
   clearFeedback: () => void;
@@ -43,6 +45,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const actionFlight = useRef(false);
   const signOutFlight = useRef(false);
@@ -60,6 +63,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
       if (!active) return;
       authEventVersion += 1;
       setUser(session?.user ?? null);
+      if (session) setPendingVerificationEmail(null);
       setRecoveryMode(event === "PASSWORD_RECOVERY");
       setError(null);
       setLoading(false);
@@ -73,6 +77,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
         setUser(null);
       } else {
         setUser(result.session?.user ?? null);
+        if (result.session) setPendingVerificationEmail(null);
       }
       setLoading(false);
     }).catch(() => {
@@ -133,8 +138,13 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
         setError(failureMessage(result.error, "No pudimos crear la cuenta. Intenta de nuevo."));
         return false;
       }
-      if (result.session) setUser(result.session.user);
-      else setNotice("Revisa tu correo para confirmar tu cuenta.");
+      if (result.session) {
+        setUser(result.session.user);
+        setPendingVerificationEmail(null);
+      } else {
+        setPendingVerificationEmail(email);
+        setNotice("Revisa tu correo para obtener el código de seis dígitos.");
+      }
       return true;
     } catch {
       setError("No pudimos crear la cuenta. Intenta de nuevo.");
@@ -143,6 +153,25 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
       finishAction();
     }
   }, [beginAction, client, finishAction, redirectTo]);
+
+  const verifyEmailCode = useCallback(async (email: string, code: string) => {
+    if (!client || !beginAction()) return false;
+    try {
+      const result = await client.verifyEmailCode(email, code);
+      if (result.error || !result.session) {
+        setError(result.error ? failureMessage(result.error, "No pudimos confirmar el código. Intenta de nuevo.") : "No pudimos confirmar el código. Intenta de nuevo.");
+        return false;
+      }
+      setUser(result.session.user);
+      setPendingVerificationEmail(null);
+      return true;
+    } catch {
+      setError("No pudimos confirmar el código. Intenta de nuevo.");
+      return false;
+    } finally {
+      finishAction();
+    }
+  }, [beginAction, client, finishAction]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
     if (!client || !beginAction()) return false;
@@ -196,6 +225,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
       else {
         setUser(null);
         setRecoveryMode(false);
+        setPendingVerificationEmail(null);
       }
     } catch {
       setError("No pudimos cerrar sesión. Intenta de nuevo.");
@@ -213,14 +243,16 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     notice,
     busy,
     recoveryMode,
+    pendingVerificationEmail,
     signIn,
     signUp,
+    verifyEmailCode,
     requestPasswordReset,
     updatePassword,
     clearFeedback,
     signingOut,
     signOut
-  }), [busy, clearFeedback, client, error, loading, notice, recoveryMode, requestPasswordReset, signIn, signOut, signUp, signingOut, updatePassword, user]);
+  }), [busy, clearFeedback, client, error, loading, notice, pendingVerificationEmail, recoveryMode, requestPasswordReset, signIn, signOut, signUp, signingOut, updatePassword, user, verifyEmailCode]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

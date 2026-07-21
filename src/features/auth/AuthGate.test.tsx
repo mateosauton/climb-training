@@ -15,6 +15,7 @@ function fakeClient(session: AuthSession = null) {
       return () => undefined;
     }),
     signUp: vi.fn(async () => ({ session: null, error: null })),
+    verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
@@ -59,8 +60,12 @@ describe("AuthGate", () => {
     expect(auth.client.signIn).toHaveBeenCalledWith("mateo@example.com", "password1");
   });
 
-  it("creates an account and shows the confirmation notice", async () => {
+  it("creates an account then verifies a six-digit email code", async () => {
     const auth = fakeClient();
+    vi.mocked(auth.client.verifyEmailCode).mockResolvedValue({
+      session: { user: { id: "verified-user", email: "mateo@example.com" } },
+      error: null
+    });
     renderGate(auth.client);
     const user = userEvent.setup();
 
@@ -71,7 +76,16 @@ describe("AuthGate", () => {
     await user.click(screen.getByRole("button", { name: "Registrarme" }));
 
     expect(auth.client.signUp).toHaveBeenCalledWith("mateo@example.com", "password1", "https://example.com/escalada/");
-    expect(await screen.findByText("Revisa tu correo para confirmar tu cuenta.")).toBeInTheDocument();
+    expect(await screen.findByText("Revisa tu correo para obtener el código de seis dígitos.")).toBeInTheDocument();
+    const code = screen.getByLabelText("Código de verificación");
+    expect(code).toHaveAttribute("inputmode", "numeric");
+    expect(code).toHaveAttribute("maxlength", "6");
+
+    await user.type(code, "123456");
+    await user.click(screen.getByRole("button", { name: "Confirmar código" }));
+
+    expect(auth.client.verifyEmailCode).toHaveBeenCalledWith("mateo@example.com", "123456");
+    expect(await screen.findByText("tracker for verified-user")).toBeInTheDocument();
   });
 
   it.each([
