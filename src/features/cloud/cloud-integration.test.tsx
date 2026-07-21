@@ -18,6 +18,7 @@ function authenticatedClient(session: AuthSession): AuthClient {
     getSession: vi.fn(async () => ({ session, error: null })),
     onAuthStateChange: vi.fn(() => () => undefined),
     signUp: vi.fn(async () => ({ session: null, error: null })),
+    verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
@@ -30,7 +31,7 @@ function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepos
     ensureProfile,
     saveAvatarPath: vi.fn(async () => undefined),
     hydrate: vi.fn(async () => ({ facts: [], sessionLogs: [], guided: { schemaVersion: 1, activeRun: null, history: [] }, activePlan: null })),
-    submitQuestionnaire: vi.fn(async () => undefined),
+    submitQuestionnaire: vi.fn(async () => "00000000-0000-4000-8000-000000000001"),
     appendFacts: vi.fn(async () => undefined),
     saveGuidedState: vi.fn(async () => undefined),
     listActivePlan: vi.fn(async () => null),
@@ -166,23 +167,65 @@ describe("cloud-primary app integration", () => {
     expect(screen.getByRole("button", { name: "Reintentar importación" })).toBeInTheDocument();
   });
 
-  it("writes a questionnaire to the cloud with a retry-safe key after saving recovery data", async () => {
+  it("persists a questionnaire before generating its plan", async () => {
     let submitted: Parameters<CloudRepository["submitQuestionnaire"]>[0] | null = null;
-    const submitQuestionnaire = vi.fn(async (input: Parameters<CloudRepository["submitQuestionnaire"]>[0]) => { submitted = input; });
-    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire };
+    const submitQuestionnaire = vi.fn(async (input: Parameters<CloudRepository["submitQuestionnaire"]>[0]) => {
+      submitted = input;
+      return input.id;
+    });
+    const generatePlan = vi.fn(async () => ({ jobId: "job-1", status: "published" as const }));
+    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire, generatePlan };
     render(<App cloudRepository={cloud} />);
 
     await screen.findByRole("button", { name: /^6\./ }).then((button) => button.click());
     await screen.findByRole("button", { name: "Guardar cuestionario" }).then((button) => button.click());
     await waitFor(() => expect(submitQuestionnaire).toHaveBeenCalledTimes(1));
-    expect(submitted).toMatchObject({ version: 2, idempotencyKey: expect.any(String) });
+    expect(submitted).toMatchObject({ id: expect.any(String), version: 2, idempotencyKey: expect.any(String) });
+    await waitFor(() => expect(generatePlan).toHaveBeenCalledWith({
+      questionnaireId: (submitted as NonNullable<typeof submitted>).id,
+      idempotencyKey: expect.any(String)
+    }));
+    expect(await screen.findByText("Tu plan está listo.")).toBeInTheDocument();
   });
 
-  it("disables local-only avatar selection and still lets onboarding finish", async () => {
+  it("keeps a failed plan generation available to retry", async () => {
+    const submitQuestionnaire = vi.fn(async (input: Parameters<CloudRepository["submitQuestionnaire"]>[0]) => input.id);
+    const generatePlan = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ jobId: "job-1", status: "published" as const });
+    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire, generatePlan };
+    const user = userEvent.setup();
+    render(<App cloudRepository={cloud} />);
+
+    await user.click(await screen.findByRole("button", { name: /^6\./ }));
+    await user.click(await screen.findByRole("button", { name: "Guardar cuestionario" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos generar tu plan. Intentá nuevamente.");
+    await user.click(screen.getByRole("button", { name: "Reintentar generación" }));
+    await waitFor(() => expect(generatePlan).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Tu plan está listo.")).toBeInTheDocument();
+  });
+
+  it("does not complete onboarding locally when cloud questionnaire persistence fails", async () => {
+    const submitQuestionnaire = vi.fn(async () => { throw new Error("offline"); });
+    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire };
+    const first = render(<App cloudRepository={cloud} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
+    expect(await screen.findAllByText("No pudimos guardar el cuestionario en la nube. Intentá nuevamente.")).not.toHaveLength(0);
+    first.unmount();
+
+    render(<App cloudRepository={cloud} />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("disables local-only avatar selection and requires questionnaire submission", async () => {
     render(<App />);
 
     expect(screen.getByLabelText("Foto de perfil")).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Completar mas tarde" }));
+    expect(screen.queryByRole("button", { name: "Completar mas tarde" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });

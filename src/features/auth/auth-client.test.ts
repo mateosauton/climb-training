@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
     getSession: vi.fn(),
     onAuthStateChange: vi.fn(),
     signUp: vi.fn(),
+    verifyOtp: vi.fn(),
     signInWithPassword: vi.fn(),
     resetPasswordForEmail: vi.fn(),
     updateUser: vi.fn(),
@@ -31,6 +32,7 @@ describe("createSupabaseAuthClient", () => {
     mocks.createClient.mockReturnValue({ auth: mocks });
     mocks.getSession.mockResolvedValue({ data: { session: null }, error: null });
     mocks.signUp.mockResolvedValue({ data: { session: null }, error: null });
+    mocks.verifyOtp.mockResolvedValue({ data: { session: null }, error: null });
     mocks.signInWithPassword.mockResolvedValue({ data: { session: null }, error: null });
     mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
     mocks.updateUser.mockResolvedValue({ error: null });
@@ -41,6 +43,7 @@ describe("createSupabaseAuthClient", () => {
     const client = createSupabaseAuthClient({ url: "https://project.supabase.co", publishableKey: "public-key" });
 
     await client.signUp("user@example.com", "password1", "https://app.test/escalada/");
+    await client.verifyEmailCode("user@example.com", "123456");
     await client.signIn("user@example.com", "password1");
     await client.requestPasswordReset("user@example.com", "https://app.test/escalada/");
     await client.updatePassword("new-password1");
@@ -50,9 +53,20 @@ describe("createSupabaseAuthClient", () => {
       password: "password1",
       options: { emailRedirectTo: "https://app.test/escalada/" }
     });
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({ email: "user@example.com", token: "123456", type: "email" });
     expect(mocks.signInWithPassword).toHaveBeenCalledWith({ email: "user@example.com", password: "password1" });
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith("user@example.com", { redirectTo: "https://app.test/escalada/" });
     expect(mocks.updateUser).toHaveBeenCalledWith({ password: "new-password1" });
+  });
+
+  it("returns the verified session from an email code", async () => {
+    mocks.verifyOtp.mockResolvedValue({ data: { session: session("verified-user") }, error: null });
+    const client = createSupabaseAuthClient({ url: "https://project.supabase.co", publishableKey: "public-key" });
+
+    await expect(client.verifyEmailCode("mateo@example.com", "123456")).resolves.toEqual({
+      session: { user: { id: "verified-user", email: "mateo@example.com" } },
+      error: null
+    });
   });
 
   it("returns only the mapped user from a session", async () => {

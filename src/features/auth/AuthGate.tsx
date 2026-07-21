@@ -31,12 +31,14 @@ export function AuthGate({ children }: AuthGateProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
   const changeMode = (next: FormMode) => {
     setMode(next);
     setPassword("");
     setConfirmation("");
+    setVerificationCode("");
     setLocalError(null);
     auth.clearFeedback();
   };
@@ -56,6 +58,14 @@ export function AuthGate({ children }: AuthGateProps) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLocalError(null);
+    if (auth.pendingVerificationEmail) {
+      if (!/^\d{6}$/.test(verificationCode)) {
+        setLocalError("Ingresa el código de seis dígitos.");
+        return;
+      }
+      await auth.verifyEmailCode(auth.pendingVerificationEmail, verificationCode);
+      return;
+    }
     if (auth.recoveryMode) {
       if (validateNewPassword()) await auth.updatePassword(password);
       return;
@@ -107,8 +117,11 @@ export function AuthGate({ children }: AuthGateProps) {
   if (auth.user && !auth.recoveryMode) return children(auth.user);
 
   const isRecovery = auth.recoveryMode;
+  const isVerifyingEmail = Boolean(auth.pendingVerificationEmail);
   const title = isRecovery
     ? "Crea una nueva contraseña"
+    : isVerifyingEmail
+      ? "Confirma tu correo"
     : mode === "sign-up"
       ? "Crea tu cuenta"
       : mode === "reset"
@@ -116,6 +129,8 @@ export function AuthGate({ children }: AuthGateProps) {
         : "Escalada 4W";
   const description = isRecovery
     ? "Elige una contraseña nueva para tu cuenta."
+    : isVerifyingEmail
+      ? "Ingresa el código de seis dígitos que enviamos a tu correo."
     : mode === "sign-up"
       ? "Regístrate para guardar el acceso a tus datos locales."
       : mode === "reset"
@@ -149,7 +164,23 @@ export function AuthGate({ children }: AuthGateProps) {
           ) : null}
 
           <form className="space-y-4" onSubmit={submit}>
-            {!isRecovery ? (
+            {isVerifyingEmail ? (
+              <div className="space-y-2">
+                <Label htmlFor="auth-verification-code">Código de verificación</Label>
+                <Input
+                  id="auth-verification-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  pattern="[0-9]{6}"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  disabled={auth.busy}
+                  required
+                />
+              </div>
+            ) : !isRecovery ? (
               <div className="space-y-2">
                 <Label htmlFor="auth-email">Correo electrónico</Label>
                 <Input
@@ -164,7 +195,7 @@ export function AuthGate({ children }: AuthGateProps) {
               </div>
             ) : null}
 
-            {mode !== "reset" || isRecovery ? (
+            {!isVerifyingEmail && (mode !== "reset" || isRecovery) ? (
               <div className="space-y-2">
                 <Label htmlFor="auth-password">{isRecovery ? "Nueva contraseña" : "Contraseña"}</Label>
                 <Input
@@ -179,7 +210,7 @@ export function AuthGate({ children }: AuthGateProps) {
               </div>
             ) : null}
 
-            {isRecovery || mode === "sign-up" ? (
+            {!isVerifyingEmail && (isRecovery || mode === "sign-up") ? (
               <div className="space-y-2">
                 <Label htmlFor="auth-confirmation">Confirmar contraseña</Label>
                 <Input
@@ -196,11 +227,11 @@ export function AuthGate({ children }: AuthGateProps) {
 
             <Button className="h-11 w-full" type="submit" disabled={auth.busy}>
               {auth.busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : null}
-              {isRecovery ? "Guardar contraseña" : mode === "sign-up" ? "Registrarme" : mode === "reset" ? "Enviar enlace" : "Iniciar sesión"}
+              {isVerifyingEmail ? "Confirmar código" : isRecovery ? "Guardar contraseña" : mode === "sign-up" ? "Registrarme" : mode === "reset" ? "Enviar enlace" : "Iniciar sesión"}
             </Button>
           </form>
 
-          {!isRecovery ? (
+          {!isRecovery && !isVerifyingEmail ? (
             <div className="flex flex-col items-center gap-1">
               {mode === "sign-in" ? (
                 <>

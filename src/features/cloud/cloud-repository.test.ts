@@ -100,7 +100,7 @@ describe("cloud repository", () => {
     const repository = createCloudRepository(fake.client, () => "2026-07-15T12:00:00.000Z");
 
     await repository.ensureProfile();
-    await repository.submitQuestionnaire({ version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" });
+    await repository.submitQuestionnaire({ id: "00000000-0000-4000-8000-000000000001", version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" });
     await repository.startSessionRun({ planId: "plan-1", planSessionId: "session-1" });
     await repository.appendSessionLog({
       runId: "run-1",
@@ -113,6 +113,7 @@ describe("cloud repository", () => {
         table: "questionnaire_submissions",
         operation: "upsert",
         value: {
+          id: "00000000-0000-4000-8000-000000000001",
           athlete_id: "athlete-1",
           answers: { goal: "boulder" },
           idempotency_key: "questionnaire-1",
@@ -155,16 +156,17 @@ describe("cloud repository", () => {
   it("uses the athlete-scoped unique key to make questionnaire retries safe", async () => {
     const fake = createFakeClient();
     const repository = createCloudRepository(fake.client);
-    const input = { version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" };
+    const input = { id: "00000000-0000-4000-8000-000000000002", version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" };
 
-    await repository.submitQuestionnaire(input);
-    await repository.submitQuestionnaire(input);
+    await expect(repository.submitQuestionnaire(input)).resolves.toBe("00000000-0000-4000-8000-000000000002");
+    await expect(repository.submitQuestionnaire(input)).resolves.toBe("00000000-0000-4000-8000-000000000002");
 
     expect(fake.calls).toEqual([
       {
         table: "questionnaire_submissions",
         operation: "upsert",
         value: {
+          id: "00000000-0000-4000-8000-000000000002",
           athlete_id: "athlete-1",
           answers: { goal: "boulder" },
           idempotency_key: "questionnaire-1",
@@ -177,6 +179,7 @@ describe("cloud repository", () => {
         table: "questionnaire_submissions",
         operation: "upsert",
         value: {
+          id: "00000000-0000-4000-8000-000000000002",
           athlete_id: "athlete-1",
           answers: { goal: "boulder" },
           idempotency_key: "questionnaire-1",
@@ -227,7 +230,7 @@ describe("cloud repository", () => {
     const repository = createCloudRepository(fake.client);
 
     await expect(repository.ensureProfile()).rejects.toEqual({ code: "unauthenticated" });
-    await expect(repository.submitQuestionnaire({ version: 2, answers: {}, idempotencyKey: "questionnaire-1" }))
+    await expect(repository.submitQuestionnaire({ id: "00000000-0000-4000-8000-000000000003", version: 2, answers: {}, idempotencyKey: "questionnaire-1" }))
       .rejects.toEqual({ code: "unauthenticated" });
     await expect(repository.startSessionRun({ planId: "plan-1", planSessionId: "session-1" }))
       .rejects.toEqual({ code: "unauthenticated" });
