@@ -30,6 +30,8 @@ export function OnboardingProcessMockup() {
   const [discipline, setDiscipline] = useState("Boulder");
   const [focus, setFocus] = useState(["Técnica"]);
   const [pain, setPain] = useState("No");
+  const [painAreas, setPainAreas] = useState<string[]>([]);
+  const [painIntensity, setPainIntensity] = useState<Record<string, number>>({});
   const [places, setPlaces] = useState(["Gimnasio"]);
   const [equipment, setEquipment] = useState(["Muro de boulder"]);
   const current = screens.indexOf(screen);
@@ -61,7 +63,7 @@ export function OnboardingProcessMockup() {
           {screen === "verify" ? <VerificationFields code={code} setCode={setCode} /> : null}
           {screen === "personal" ? <PersonalFields name={name} setName={setName} ageRange={ageRange} setAgeRange={setAgeRange} /> : null}
           {screen === "climber" ? <ClimberFields experienceYears={experienceYears} discipline={discipline} setExperienceYears={setExperienceYears} setDiscipline={setDiscipline} /> : null}
-          {screen === "focus" ? <FocusFields focus={focus} pain={pain} setPain={setPain} toggleFocus={(value) => toggle(value, focus, setFocus, 2)} /> : null}
+          {screen === "focus" ? <FocusFields focus={focus} pain={pain} painAreas={painAreas} painIntensity={painIntensity} setPain={setPain} toggleFocus={(value) => toggle(value, focus, setFocus, 2)} togglePainArea={(area) => toggle(area, painAreas, setPainAreas)} setPainIntensity={(area, intensity) => setPainIntensity((current) => ({ ...current, [area]: intensity }))} /> : null}
           {screen === "equipment" ? <EquipmentFields places={places} equipment={equipment} togglePlace={(value) => toggle(value, places, setPlaces)} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
 
           {screen !== "creating" ? <div className="pt-2">
@@ -92,8 +94,12 @@ function ClimberFields({ experienceYears, discipline, setExperienceYears, setDis
   return <div className="space-y-4"><div className="space-y-3"><div className="flex items-center justify-between gap-3"><Label htmlFor="mockup-experience-range">Experiencia escalando</Label><output htmlFor="mockup-experience-range" className="rounded-md bg-muted px-2 py-1 text-sm font-medium tabular-nums">{experienceLabel}</output></div><Slider id="mockup-experience-range" aria-label="Experiencia escalando" min={0} max={15} step={1} value={experienceYears} onValueChange={setExperienceYears} /><div className="flex justify-between text-xs text-muted-foreground"><span>Nuevo/a</span><span>15+ años</span></div></div><ChoiceGroup label="¿Qué escalás más?" choices={["Boulder", "Deportiva", "Ambas"]} selected={discipline} onSelect={setDiscipline} /><ChoiceGroup label="Sesiones por semana" choices={["1", "2", "3", "4+"]} selected="3" onSelect={() => undefined} /></div>;
 }
 
-function FocusFields({ focus, pain, setPain, toggleFocus }: { focus: string[]; pain: string; setPain: (value: string) => void; toggleFocus: (value: string) => void }) {
-  return <div className="space-y-4"><MultiChoiceGroup label="Áreas a mejorar (hasta 2)" choices={["Fuerza", "Técnica", "Resistencia", "Movilidad", "Lectura"]} selected={focus} onToggle={toggleFocus} /><ChoiceGroup label="¿Tenés dolor que afecta tu escalada hoy?" choices={["No", "Un poco", "Sí"]} selected={pain} onSelect={setPain} /></div>;
+function FocusFields({ focus, pain, painAreas, painIntensity, setPain, toggleFocus, togglePainArea, setPainIntensity }: { focus: string[]; pain: string; painAreas: string[]; painIntensity: Record<string, number>; setPain: (value: string) => void; toggleFocus: (value: string) => void; togglePainArea: (area: string) => void; setPainIntensity: (area: string, intensity: number) => void }) {
+  return <div className="space-y-4"><MultiChoiceGroup label="Áreas a mejorar (hasta 2)" choices={["Fuerza", "Técnica", "Resistencia", "Movilidad", "Lectura"]} selected={focus} onToggle={toggleFocus} /><ChoiceGroup label="¿Tenés dolor que afecta tu escalada hoy?" choices={["No", "Un poco", "Sí"]} selected={pain} onSelect={setPain} />{pain === "Sí" ? <div className="space-y-4 border-t pt-4"><MultiChoiceGroup label="¿Dónde sentís dolor?" choices={["Dedos", "Muñeca", "Codo", "Hombro", "Espalda", "Rodilla", "Tobillo"]} selected={painAreas} onToggle={togglePainArea} />{painAreas.map((area) => <PainIntensityField key={area} area={area} intensity={painIntensity[area] ?? 5} onIntensityChange={setPainIntensity} />)}</div> : null}</div>;
+}
+
+function PainIntensityField({ area, intensity, onIntensityChange }: { area: string; intensity: number; onIntensityChange: (area: string, intensity: number) => void }) {
+  return <div className="space-y-3 rounded-lg border bg-muted/30 p-3"><div className="flex items-center justify-between gap-3"><Label htmlFor={`mockup-pain-${area}`}>{area}</Label><output htmlFor={`mockup-pain-${area}`} className="rounded-md bg-background px-2 py-1 text-sm font-medium tabular-nums">{intensity}/10</output></div><Slider id={`mockup-pain-${area}`} aria-label={`Intensidad de dolor en ${area}`} min={1} max={10} step={1} value={[intensity]} onValueChange={([value]) => onIntensityChange(area, value)} /><div className="flex justify-between text-xs text-muted-foreground"><span>1 · Baja</span><span>10 · Alta</span></div></div>;
 }
 
 function EquipmentFields({ places, equipment, togglePlace, toggleEquipment }: { places: string[]; equipment: string[]; togglePlace: (value: string) => void; toggleEquipment: (value: string) => void }) {
