@@ -47,7 +47,8 @@ export function OnboardingProcessMockup() {
     <main className="flex min-h-svh items-center justify-center bg-background px-4 py-10 text-foreground">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,color-mix(in_oklch,var(--primary),transparent_78%),transparent_34rem)]" />
       <Card className="relative w-full max-w-md border-border/80 shadow-xl">
-        <CardHeader className="text-center">
+        <CardHeader className="relative text-center">
+          {current > 0 && screen !== "creating" ? <Button type="button" variant="outline" size="icon" onClick={back} aria-label="Volver" className="absolute left-0 top-0"><ArrowLeft /></Button> : null}
           <div className="mx-auto mb-2 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Icon className={`size-6 ${screen === "creating" ? "animate-spin" : ""}`} aria-hidden="true" />
           </div>
@@ -64,9 +65,8 @@ export function OnboardingProcessMockup() {
           {screen === "equipment" ? <EquipmentFields place={place} equipment={equipment} setPlace={setPlace} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
           {screen === "creating" ? <CreatingPlan name={name || "tu"} /> : null}
 
-          {screen !== "creating" ? <div className="flex gap-2 pt-2">
-            {current > 0 ? <Button type="button" variant="outline" size="icon" onClick={back} aria-label="Volver"><ArrowLeft /></Button> : null}
-            <Button type="button" className="h-11 flex-1" onClick={next} disabled={screen === "verify" && code.length !== 6}>{screen === "equipment" ? "Crear mi plan" : screen === "verify" ? "Confirmar código" : screen === "register" ? "Registrarme" : "Continuar"}</Button>
+          {screen !== "creating" ? <div className="pt-2">
+            <Button type="button" className="h-11 w-full" onClick={next} disabled={screen === "verify" && code.length !== 6}>{screen === "equipment" ? "Crear mi plan" : screen === "verify" ? "Confirmar código" : screen === "register" ? "Registrarme" : "Continuar"}</Button>
           </div> : <Button type="button" className="h-11 w-full" onClick={() => setScreen("register")}>Ver el flujo de nuevo</Button>}
           <p className="text-center text-xs text-muted-foreground">Mockup del flujo de registro y onboarding</p>
         </CardContent>
