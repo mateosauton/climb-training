@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 
 type Screen = "register" | "verify" | "personal" | "climber" | "focus" | "equipment" | "creating";
 
@@ -24,6 +25,7 @@ export function OnboardingProcessMockup() {
   const [screen, setScreen] = useState<Screen>("register");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [ageRange, setAgeRange] = useState([18, 34]);
   const [experience, setExperience] = useState("1–3 años");
   const [discipline, setDiscipline] = useState("Boulder");
   const [focus, setFocus] = useState(["Técnica"]);
@@ -56,7 +58,7 @@ export function OnboardingProcessMockup() {
         <CardContent className="space-y-4">
           {screen === "register" ? <RegisterFields /> : null}
           {screen === "verify" ? <VerificationFields code={code} setCode={setCode} /> : null}
-          {screen === "personal" ? <PersonalFields name={name} setName={setName} /> : null}
+          {screen === "personal" ? <PersonalFields name={name} setName={setName} ageRange={ageRange} setAgeRange={setAgeRange} /> : null}
           {screen === "climber" ? <ClimberFields experience={experience} discipline={discipline} setExperience={setExperience} setDiscipline={setDiscipline} /> : null}
           {screen === "focus" ? <FocusFields focus={focus} pain={pain} setPain={setPain} toggleFocus={(value) => toggle(value, focus, setFocus, 2)} /> : null}
           {screen === "equipment" ? <EquipmentFields place={place} equipment={equipment} setPlace={setPlace} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
@@ -81,8 +83,8 @@ function VerificationFields({ code, setCode }: { code: string; setCode: (value: 
   return <div className="space-y-4"><Alert><Mail className="size-4" /><AlertTitle>Revisa tu correo</AlertTitle><AlertDescription>Enviamos un código a mateo@ejemplo.com.</AlertDescription></Alert><div className="space-y-2"><Label htmlFor="mockup-code">Código de verificación</Label><Input id="mockup-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} className="h-12 text-center font-mono text-lg tracking-[0.35em]" /><p className="text-xs text-muted-foreground">Ingresá los seis dígitos para continuar con tu perfil.</p></div></div>;
 }
 
-function PersonalFields({ name, setName }: { name: string; setName: (value: string) => void }) {
-  return <div className="space-y-4"><div className="space-y-2"><Label htmlFor="mockup-name">¿Cómo te llamamos?</Label><Input id="mockup-name" placeholder="Tu nombre" value={name} onChange={(event) => setName(event.target.value)} /></div><ChoiceGroup label="Rango de edad (opcional)" choices={["–18", "18–34", "35+"]} selected="18–34" onSelect={() => undefined} /></div>;
+function PersonalFields({ name, setName, ageRange, setAgeRange }: { name: string; setName: (value: string) => void; ageRange: number[]; setAgeRange: (value: number[]) => void }) {
+  return <div className="space-y-4"><div className="space-y-2"><Label htmlFor="mockup-name">¿Cómo te llamamos?</Label><Input id="mockup-name" placeholder="Tu nombre" value={name} onChange={(event) => setName(event.target.value)} /></div><div className="space-y-3"><div className="flex items-center justify-between gap-3"><Label htmlFor="mockup-age-range">Rango de edad <span className="font-normal text-muted-foreground">(opcional)</span></Label><output htmlFor="mockup-age-range" className="rounded-md bg-muted px-2 py-1 text-sm font-medium tabular-nums">{ageRange[0]}–{ageRange[1]} años</output></div><Slider id="mockup-age-range" aria-label="Rango de edad" min={12} max={70} step={1} minStepsBetweenThumbs={1} value={ageRange} onValueChange={setAgeRange} /><div className="flex justify-between text-xs text-muted-foreground"><span>12</span><span>70+</span></div></div></div>;
 }
 
 function ClimberFields({ experience, discipline, setExperience, setDiscipline }: { experience: string; discipline: string; setExperience: (value: string) => void; setDiscipline: (value: string) => void }) {
