@@ -28,6 +28,7 @@ export function OnboardingProcessMockup() {
   const [ageRange, setAgeRange] = useState([18, 34]);
   const [experienceYears, setExperienceYears] = useState([2]);
   const [disciplines, setDisciplines] = useState(["Boulder"]);
+  const [weeklySessions, setWeeklySessions] = useState("3");
   const [focus, setFocus] = useState(["Técnica"]);
   const [pain, setPain] = useState("No");
   const [painAreas, setPainAreas] = useState<string[]>([]);
@@ -62,7 +63,7 @@ export function OnboardingProcessMockup() {
           {screen === "register" ? <RegisterFields /> : null}
           {screen === "verify" ? <VerificationFields code={code} setCode={setCode} /> : null}
           {screen === "personal" ? <PersonalFields name={name} setName={setName} ageRange={ageRange} setAgeRange={setAgeRange} /> : null}
-          {screen === "climber" ? <ClimberFields experienceYears={experienceYears} disciplines={disciplines} setExperienceYears={setExperienceYears} toggleDiscipline={(value) => toggle(value, disciplines, setDisciplines)} /> : null}
+          {screen === "climber" ? <ClimberFields experienceYears={experienceYears} disciplines={disciplines} weeklySessions={weeklySessions} setExperienceYears={setExperienceYears} setWeeklySessions={setWeeklySessions} toggleDiscipline={(value) => toggle(value, disciplines, setDisciplines)} /> : null}
           {screen === "focus" ? <FocusFields focus={focus} pain={pain} painAreas={painAreas} painIntensity={painIntensity} setPain={setPain} toggleFocus={(value) => toggle(value, focus, setFocus, 2)} togglePainArea={(area) => toggle(area, painAreas, setPainAreas)} setPainIntensity={(area, intensity) => setPainIntensity((current) => ({ ...current, [area]: intensity }))} /> : null}
           {screen === "equipment" ? <EquipmentFields places={places} equipment={equipment} togglePlace={(value) => toggle(value, places, setPlaces)} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
 
@@ -88,10 +89,10 @@ function PersonalFields({ name, setName, ageRange, setAgeRange }: { name: string
   return <div className="space-y-4"><div className="space-y-2"><Label htmlFor="mockup-name">¿Cómo te llamamos?</Label><Input id="mockup-name" placeholder="Tu nombre" value={name} onChange={(event) => setName(event.target.value)} /></div><div className="space-y-3"><div className="flex items-center justify-between gap-3"><Label htmlFor="mockup-age-range">Rango de edad <span className="font-normal text-muted-foreground">(opcional)</span></Label><output htmlFor="mockup-age-range" className="rounded-md bg-muted px-2 py-1 text-sm font-medium tabular-nums">{ageRange[0]}–{ageRange[1]} años</output></div><Slider id="mockup-age-range" aria-label="Rango de edad" min={12} max={70} step={1} minStepsBetweenThumbs={1} value={ageRange} onValueChange={setAgeRange} /><div className="flex justify-between text-xs text-muted-foreground"><span>12</span><span>70+</span></div></div></div>;
 }
 
-function ClimberFields({ experienceYears, disciplines, setExperienceYears, toggleDiscipline }: { experienceYears: number[]; disciplines: string[]; setExperienceYears: (value: number[]) => void; toggleDiscipline: (value: string) => void }) {
+function ClimberFields({ experienceYears, disciplines, weeklySessions, setExperienceYears, setWeeklySessions, toggleDiscipline }: { experienceYears: number[]; disciplines: string[]; weeklySessions: string; setExperienceYears: (value: number[]) => void; setWeeklySessions: (value: string) => void; toggleDiscipline: (value: string) => void }) {
   const years = experienceYears[0];
   const experienceLabel = years === 0 ? "Nuevo/a" : years >= 15 ? "15+ años" : `${years} ${years === 1 ? "año" : "años"}`;
-  return <div className="space-y-4"><div className="space-y-3"><div className="flex items-center justify-between gap-3"><Label htmlFor="mockup-experience-range">Experiencia escalando</Label><output htmlFor="mockup-experience-range" className="rounded-md bg-muted px-2 py-1 text-sm font-medium tabular-nums">{experienceLabel}</output></div><Slider id="mockup-experience-range" aria-label="Experiencia escalando" min={0} max={15} step={1} value={experienceYears} onValueChange={setExperienceYears} /><div className="flex justify-between text-xs text-muted-foreground"><span>Nuevo/a</span><span>15+ años</span></div></div><MultiChoiceGroup label="¿Qué escalás más?" choices={["Boulder", "Deportiva"]} selected={disciplines} onToggle={toggleDiscipline} /><ChoiceGroup label="Sesiones por semana" choices={["1", "2", "3", "4+"]} selected="3" onSelect={() => undefined} /></div>;
+  return <div className="space-y-4"><div className="space-y-3"><div className="flex items-center justify-between gap-3"><Label htmlFor="mockup-experience-range">Experiencia escalando</Label><output htmlFor="mockup-experience-range" className="rounded-md bg-muted px-2 py-1 text-sm font-medium tabular-nums">{experienceLabel}</output></div><Slider id="mockup-experience-range" aria-label="Experiencia escalando" min={0} max={15} step={1} value={experienceYears} onValueChange={setExperienceYears} /><div className="flex justify-between text-xs text-muted-foreground"><span>Nuevo/a</span><span>15+ años</span></div></div><MultiChoiceGroup label="¿Qué escalás más?" choices={["Boulder", "Deportiva"]} selected={disciplines} onToggle={toggleDiscipline} /><ChoiceGroup label="Sesiones por semana" choices={["1", "2", "3", "4+"]} selected={weeklySessions} onSelect={setWeeklySessions} /></div>;
 }
 
 function FocusFields({ focus, pain, painAreas, painIntensity, setPain, toggleFocus, togglePainArea, setPainIntensity }: { focus: string[]; pain: string; painAreas: string[]; painIntensity: Record<string, number>; setPain: (value: string) => void; toggleFocus: (value: string) => void; togglePainArea: (area: string) => void; setPainIntensity: (area: string, intensity: number) => void }) {
