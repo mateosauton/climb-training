@@ -8,6 +8,7 @@ import { createCloudClient } from "./features/cloud/cloud-client";
 import { createCloudRepository, type CloudQueryClient } from "./features/cloud/cloud-repository";
 import { createE2ECloudRepository } from "./features/cloud/e2e-cloud-repository";
 import { createCloudImport } from "./features/cloud/cloud-import";
+import { OnboardingProcessMockup } from "./features/onboarding/OnboardingProcessMockup";
 import "./index.css";
 
 const e2eUserId = import.meta.env.DEV ? import.meta.env.VITE_E2E_AUTH_USER_ID?.trim() : undefined;
@@ -24,16 +25,20 @@ const cloudRepository = e2eSignedOut
   : cloudClient ? createCloudRepository(cloudClient as unknown as CloudQueryClient) : null;
 const cloudImport = cloudClient ? createCloudImport(cloudClient, localStorage) : null;
 
+const isOnboardingMockup = new URLSearchParams(window.location.search).get("mockup") === "onboarding";
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AppRoot
-      client={authClient}
-      config={authConfig}
-      origin={window.location.origin}
-      baseUrl={import.meta.env.BASE_URL}
-      repository={cloudRepository}
-      cloudImport={cloudImport}
-      cloudAvatarClient={cloudClient}
-    />
+    {isOnboardingMockup ? <OnboardingProcessMockup /> : (
+      <AppRoot
+        client={authClient}
+        config={authConfig}
+        origin={window.location.origin}
+        baseUrl={import.meta.env.BASE_URL}
+        repository={cloudRepository}
+        cloudImport={cloudImport}
+        cloudAvatarClient={cloudClient}
+      />
+    )}
   </StrictMode>
 );
