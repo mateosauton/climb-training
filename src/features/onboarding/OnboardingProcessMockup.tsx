@@ -48,7 +48,7 @@ export function OnboardingProcessMockup() {
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,color-mix(in_oklch,var(--primary),transparent_78%),transparent_34rem)]" />
       <Card className="relative w-full max-w-md border-border/80 shadow-xl">
         <CardHeader className="relative text-center">
-          {current > 0 && screen !== "creating" ? <Button type="button" variant="outline" size="icon" onClick={back} aria-label="Volver" className="absolute left-0 top-0"><ArrowLeft /></Button> : null}
+          {current > 0 && screen !== "creating" ? <Button type="button" variant="outline" size="icon" onClick={back} aria-label="Volver" className="absolute left-(--card-spacing) top-0"><ArrowLeft /></Button> : null}
           <div className="mx-auto mb-2 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Icon className={`size-6 ${screen === "creating" ? "animate-spin" : ""}`} aria-hidden="true" />
           </div>
