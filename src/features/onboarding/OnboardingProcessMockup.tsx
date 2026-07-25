@@ -63,7 +63,6 @@ export function OnboardingProcessMockup() {
           {screen === "climber" ? <ClimberFields experienceYears={experienceYears} discipline={discipline} setExperienceYears={setExperienceYears} setDiscipline={setDiscipline} /> : null}
           {screen === "focus" ? <FocusFields focus={focus} pain={pain} setPain={setPain} toggleFocus={(value) => toggle(value, focus, setFocus, 2)} /> : null}
           {screen === "equipment" ? <EquipmentFields places={places} equipment={equipment} togglePlace={(value) => toggle(value, places, setPlaces)} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
-          {screen === "creating" ? <CreatingPlan name={name || "tu"} /> : null}
 
           {screen !== "creating" ? <div className="pt-2">
             <Button type="button" className="h-11 w-full" onClick={next} disabled={screen === "verify" && code.length !== 6}>{screen === "equipment" ? "Crear mi plan" : screen === "verify" ? "Confirmar código" : screen === "register" ? "Registrarme" : "Continuar"}</Button>
@@ -99,10 +98,6 @@ function FocusFields({ focus, pain, setPain, toggleFocus }: { focus: string[]; p
 
 function EquipmentFields({ places, equipment, togglePlace, toggleEquipment }: { places: string[]; equipment: string[]; togglePlace: (value: string) => void; toggleEquipment: (value: string) => void }) {
   return <div className="space-y-4"><MultiChoiceGroup label="¿Dónde entrenás más?" choices={["Gimnasio", "Board", "Roca", "Casa"]} selected={places} onToggle={togglePlace} /><MultiChoiceGroup label="Material disponible" choices={["Muro de boulder", "Hangboard", "Pesas", "Bandas", "Solo cuerpo", "No estoy seguro/a"]} selected={equipment} onToggle={toggleEquipment} /></div>;
-}
-
-function CreatingPlan({ name }: { name: string }) {
-  return <Alert role="status"><Check className="size-4" /><AlertTitle>Listo, {name}</AlertTitle><AlertDescription>Tu primera semana incluirá trabajo técnico, fuerza general y movilidad. Podés editar tus detalles más adelante desde Perfil.</AlertDescription></Alert>;
 }
 
 function ChoiceGroup({ label, choices, selected, onSelect }: { label: string; choices: string[]; selected: string; onSelect: (value: string) => void }) {
