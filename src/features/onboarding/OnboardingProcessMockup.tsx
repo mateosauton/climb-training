@@ -30,7 +30,7 @@ export function OnboardingProcessMockup() {
   const [discipline, setDiscipline] = useState("Boulder");
   const [focus, setFocus] = useState(["Técnica"]);
   const [pain, setPain] = useState("No");
-  const [place, setPlace] = useState("Gimnasio");
+  const [places, setPlaces] = useState(["Gimnasio"]);
   const [equipment, setEquipment] = useState(["Muro de boulder"]);
   const current = screens.indexOf(screen);
   const detail = details[screen];
@@ -62,7 +62,7 @@ export function OnboardingProcessMockup() {
           {screen === "personal" ? <PersonalFields name={name} setName={setName} ageRange={ageRange} setAgeRange={setAgeRange} /> : null}
           {screen === "climber" ? <ClimberFields experienceYears={experienceYears} discipline={discipline} setExperienceYears={setExperienceYears} setDiscipline={setDiscipline} /> : null}
           {screen === "focus" ? <FocusFields focus={focus} pain={pain} setPain={setPain} toggleFocus={(value) => toggle(value, focus, setFocus, 2)} /> : null}
-          {screen === "equipment" ? <EquipmentFields place={place} equipment={equipment} setPlace={setPlace} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
+          {screen === "equipment" ? <EquipmentFields places={places} equipment={equipment} togglePlace={(value) => toggle(value, places, setPlaces)} toggleEquipment={(value) => toggle(value, equipment, setEquipment)} /> : null}
           {screen === "creating" ? <CreatingPlan name={name || "tu"} /> : null}
 
           {screen !== "creating" ? <div className="pt-2">
@@ -97,8 +97,8 @@ function FocusFields({ focus, pain, setPain, toggleFocus }: { focus: string[]; p
   return <div className="space-y-4"><MultiChoiceGroup label="Áreas a mejorar (hasta 2)" choices={["Fuerza", "Técnica", "Resistencia", "Movilidad", "Lectura"]} selected={focus} onToggle={toggleFocus} /><ChoiceGroup label="¿Tenés dolor que afecta tu escalada hoy?" choices={["No", "Un poco", "Sí"]} selected={pain} onSelect={setPain} /></div>;
 }
 
-function EquipmentFields({ place, equipment, setPlace, toggleEquipment }: { place: string; equipment: string[]; setPlace: (value: string) => void; toggleEquipment: (value: string) => void }) {
-  return <div className="space-y-4"><ChoiceGroup label="¿Dónde entrenás más?" choices={["Gimnasio", "Board", "Roca", "Casa"]} selected={place} onSelect={setPlace} /><MultiChoiceGroup label="Material disponible" choices={["Muro de boulder", "Hangboard", "Pesas", "Bandas", "Solo cuerpo", "No estoy seguro/a"]} selected={equipment} onToggle={toggleEquipment} /></div>;
+function EquipmentFields({ places, equipment, togglePlace, toggleEquipment }: { places: string[]; equipment: string[]; togglePlace: (value: string) => void; toggleEquipment: (value: string) => void }) {
+  return <div className="space-y-4"><MultiChoiceGroup label="¿Dónde entrenás más?" choices={["Gimnasio", "Board", "Roca", "Casa"]} selected={places} onToggle={togglePlace} /><MultiChoiceGroup label="Material disponible" choices={["Muro de boulder", "Hangboard", "Pesas", "Bandas", "Solo cuerpo", "No estoy seguro/a"]} selected={equipment} onToggle={toggleEquipment} /></div>;
 }
 
 function CreatingPlan({ name }: { name: string }) {
