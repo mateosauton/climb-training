@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Dumbbell, HeartPulse, LoaderCircle, Mail, Mountain, Sparkles } from "lucide-react";
+import { ArrowLeft, Dumbbell, HeartPulse, LoaderCircle, Mail, Mountain, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -7,6 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { ChoiceCard } from "@/components/climb/ChoiceCard";
+import { HoldMark, RouteTraceMark } from "@/components/climb/ClimbMarks";
 
 type Screen = "register" | "verify" | "personal" | "climber" | "focus" | "equipment" | "creating";
 
@@ -108,11 +110,11 @@ function EquipmentFields({ places, equipment, togglePlace, toggleEquipment }: { 
 }
 
 function ChoiceGroup({ label, choices, selected, onSelect }: { label: string; choices: string[]; selected: string; onSelect: (value: string) => void }) {
-  return <fieldset className="space-y-2"><legend className="text-sm font-medium">{label}</legend><div className="grid grid-cols-2 gap-2">{choices.map((choice) => <Button key={choice} type="button" variant={selected === choice ? "default" : "outline"} className="h-auto min-h-10 justify-start whitespace-normal px-3 py-2 text-left" onClick={() => onSelect(choice)}>{selected === choice ? <Check /> : null}{choice}</Button>)}</div></fieldset>;
+  return <fieldset className="space-y-2"><legend className="text-sm font-medium">{label}</legend><div className="grid gap-2 sm:grid-cols-2">{choices.map((choice) => <ChoiceCard key={choice} label={choice} selected={selected === choice} onClick={() => onSelect(choice)} mark={choice === "Boulder" ? <HoldMark className="size-6" /> : <RouteTraceMark className="size-6" />} />)}</div></fieldset>;
 }
 
 function MultiChoiceGroup({ label, choices, selected, onToggle }: { label: string; choices: string[]; selected: string[]; onToggle: (value: string) => void }) {
-  return <fieldset className="space-y-2"><legend className="text-sm font-medium">{label}</legend><div className="grid grid-cols-2 gap-2">{choices.map((choice) => <Button key={choice} type="button" variant={selected.includes(choice) ? "default" : "outline"} className="h-auto min-h-10 justify-start whitespace-normal px-3 py-2 text-left" onClick={() => onToggle(choice)}>{selected.includes(choice) ? <Check /> : null}{choice}</Button>)}</div></fieldset>;
+  return <fieldset className="space-y-2"><legend className="text-sm font-medium">{label}</legend><div className="grid gap-2 sm:grid-cols-2">{choices.map((choice) => <ChoiceCard key={choice} label={choice} selected={selected.includes(choice)} onClick={() => onToggle(choice)} mark={choice === "Boulder" || choice.includes("boulder") ? <HoldMark className="size-6" /> : <RouteTraceMark className="size-6" />} />)}</div></fieldset>;
 }
 
 function Field({ label, value, type = "text" }: { label: string; value: string; type?: string }) {

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RopeKnotMark } from "@/components/climb/ClimbMarks";
 
 import type { AuthUser } from "./auth-client";
 import { useAuth } from "./AuthProvider";
@@ -142,8 +143,8 @@ export function AuthGate({ children }: AuthGateProps) {
     <AuthSurface>
       <Card className="border-border/80 shadow-xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            {isRecovery ? <KeyRound className="size-6" aria-hidden="true" /> : <Mail className="size-6" aria-hidden="true" />}
+          <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-sandstone text-river">
+            {isRecovery ? <KeyRound className="size-6" aria-hidden="true" /> : isVerifyingEmail ? <Mail className="size-6" aria-hidden="true" /> : <RopeKnotMark className="size-7" />}
           </div>
           <CardTitle><h1>{title}</h1></CardTitle>
           <CardDescription>{description}</CardDescription>

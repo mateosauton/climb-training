@@ -9,6 +9,8 @@ import { createCloudRepository, type CloudQueryClient } from "./features/cloud/c
 import { createE2ECloudRepository } from "./features/cloud/e2e-cloud-repository";
 import { createCloudImport } from "./features/cloud/cloud-import";
 import { OnboardingProcessMockup } from "./features/onboarding/OnboardingProcessMockup";
+import { DesignSystemGallery } from "./features/design-system/DesignSystemGallery";
+import { ProductFlowMockup } from "./features/design-system/ProductFlowMockup";
 import "./index.css";
 
 const e2eUserId = import.meta.env.DEV ? import.meta.env.VITE_E2E_AUTH_USER_ID?.trim() : undefined;
@@ -25,11 +27,11 @@ const cloudRepository = e2eSignedOut
   : cloudClient ? createCloudRepository(cloudClient as unknown as CloudQueryClient) : null;
 const cloudImport = cloudClient ? createCloudImport(cloudClient, localStorage) : null;
 
-const isOnboardingMockup = new URLSearchParams(window.location.search).get("mockup") === "onboarding";
+const mockup = new URLSearchParams(window.location.search).get("mockup");
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {isOnboardingMockup ? <OnboardingProcessMockup /> : (
+    {mockup === "design-system" ? <DesignSystemGallery /> : mockup === "flows" ? <ProductFlowMockup /> : mockup === "onboarding" ? <OnboardingProcessMockup /> : (
       <AppRoot
         client={authClient}
         config={authConfig}
