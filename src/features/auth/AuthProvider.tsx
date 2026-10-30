@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type { AuthClient, AuthFailure, AuthUser } from "./auth-client";
+import { passwordResetRedirectUrl } from "./auth-config";
+import { AUTH_COPY } from "./auth-copy";
+import { isOfflineError, type AuthClient, type AuthFailure, type AuthUser } from "./auth-client";
 
 type AuthContextValue = {
   configured: boolean;
@@ -15,6 +17,7 @@ type AuthContextValue = {
   signUp: (email: string, password: string) => Promise<boolean>;
   verifyEmailCode: (email: string, code: string) => Promise<boolean>;
   requestPasswordReset: (email: string) => Promise<boolean>;
+  resendConfirmation: (email: string) => Promise<boolean>;
   updatePassword: (password: string) => Promise<boolean>;
   clearFeedback: () => void;
   signingOut: boolean;
@@ -30,12 +33,18 @@ type AuthProviderProps = {
 };
 
 function failureMessage(failure: AuthFailure, fallback: string): string {
-  if (failure === "invalid_credentials") return "El correo o la contraseña no son correctos.";
+  if (failure === "invalid_credentials") return AUTH_COPY.invalidCredentials;
+  if (failure === "email_not_confirmed") return AUTH_COPY.confirmEmail;
+  if (failure === "offline") return AUTH_COPY.offline;
   if (failure === "weak_password") return "La contraseña no cumple los requisitos de seguridad.";
   if (failure === "email_rate_limit") return "El servicio de correo alcanzó su límite temporal. Intenta de nuevo más tarde.";
   if (failure === "rate_limit") return "Demasiados intentos. Espera un momento y vuelve a intentar.";
   if (failure === "expired_link") return "El enlace venció. Solicita uno nuevo.";
   return fallback;
+}
+
+function actionError(error: unknown, fallback: string): string {
+  return isOfflineError(error) ? AUTH_COPY.offline : fallback;
 }
 
 export function AuthProvider({ client, redirectTo, children }: AuthProviderProps) {
@@ -122,8 +131,8 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
       }
       setUser(result.session?.user ?? null);
       return Boolean(result.session);
-    } catch {
-      setError("No pudimos iniciar sesión. Intenta de nuevo.");
+    } catch (error) {
+      setError(actionError(error, "No pudimos iniciar sesión. Intenta de nuevo."));
       return false;
     } finally {
       finishAction();
@@ -146,8 +155,8 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
         setNotice("Revisa tu correo para obtener el código de seis dígitos.");
       }
       return true;
-    } catch {
-      setError("No pudimos crear la cuenta. Intenta de nuevo.");
+    } catch (error) {
+      setError(actionError(error, "No pudimos crear la cuenta. Intenta de nuevo."));
       return false;
     } finally {
       finishAction();
@@ -176,19 +185,37 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
   const requestPasswordReset = useCallback(async (email: string) => {
     if (!client || !beginAction()) return false;
     try {
-      const result = await client.requestPasswordReset(email, redirectTo);
+      const result = await client.requestPasswordReset(email, passwordResetRedirectUrl(redirectTo));
       if (result.error) {
         if (result.error === "email_rate_limit") {
-          setNotice("Si existe una cuenta, recibirás un enlace para cambiar tu contraseña.");
+          setNotice(AUTH_COPY.resetSent);
           return true;
         }
         setError(failureMessage(result.error, "No pudimos enviar el enlace. Intenta de nuevo."));
         return false;
       }
-      setNotice("Si existe una cuenta, recibirás un enlace para cambiar tu contraseña.");
+      setNotice(AUTH_COPY.resetSent);
       return true;
-    } catch {
-      setError("No pudimos enviar el enlace. Intenta de nuevo.");
+    } catch (error) {
+      setError(actionError(error, "No pudimos enviar el enlace. Intenta de nuevo."));
+      return false;
+    } finally {
+      finishAction();
+    }
+  }, [beginAction, client, finishAction, redirectTo]);
+
+  const resendConfirmation = useCallback(async (email: string) => {
+    if (!client || !beginAction()) return false;
+    try {
+      const result = await client.resendConfirmation(email, redirectTo);
+      if (result.error && result.error !== "email_rate_limit") {
+        setError(failureMessage(result.error, "No pudimos reenviar el enlace. Intenta de nuevo."));
+        return false;
+      }
+      setError(AUTH_COPY.confirmEmail);
+      return true;
+    } catch (error) {
+      setError(actionError(error, "No pudimos reenviar el enlace. Intenta de nuevo."));
       return false;
     } finally {
       finishAction();
@@ -248,11 +275,12 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     signUp,
     verifyEmailCode,
     requestPasswordReset,
+    resendConfirmation,
     updatePassword,
     clearFeedback,
     signingOut,
     signOut
-  }), [busy, clearFeedback, client, error, loading, notice, pendingVerificationEmail, recoveryMode, requestPasswordReset, signIn, signOut, signUp, signingOut, updatePassword, user, verifyEmailCode]);
+  }), [busy, clearFeedback, client, error, loading, notice, pendingVerificationEmail, recoveryMode, requestPasswordReset, resendConfirmation, signIn, signOut, signUp, signingOut, updatePassword, user, verifyEmailCode]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

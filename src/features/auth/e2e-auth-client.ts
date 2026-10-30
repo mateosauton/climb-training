@@ -33,6 +33,9 @@ export function createE2EAuthClient(id: string, email: string | null, signedIn =
     async requestPasswordReset() {
       return { error: "unknown" };
     },
+    async resendConfirmation() {
+      return { error: "unknown" };
+    },
     async updatePassword() {
       return { error: "unknown" };
     },

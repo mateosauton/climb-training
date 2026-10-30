@@ -12,3 +12,8 @@ export function readAuthConfig(env: Record<string, string | undefined>): AuthCon
 export function authRedirectUrl(origin: string, baseUrl: string): string {
   return new URL(baseUrl, origin).toString();
 }
+
+export function passwordResetRedirectUrl(redirectTo: string): string {
+  const base = redirectTo.endsWith("/") ? redirectTo : `${redirectTo}/`;
+  return new URL("reset/nueva", base).toString();
+}
