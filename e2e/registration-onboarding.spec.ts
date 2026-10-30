@@ -3,11 +3,12 @@ import { expect, test } from "@playwright/test";
 test("new user verifies their email, completes onboarding, and generates a plan", async ({ page }, testInfo) => {
   await page.goto("./?e2e-auth=signed-out");
 
-  await page.getByRole("button", { name: "Crear cuenta" }).click();
-  await page.getByLabel("Correo electrónico").fill("nuevo@example.com");
+  await expect(page).toHaveURL(/\/escalada\/login/);
+  await page.getByRole("link", { name: "Crear cuenta" }).click();
+  await expect(page).toHaveURL(/\/escalada\/signup/);
+  await page.getByLabel("Correo").fill("nuevo@example.com");
   await page.getByLabel("Contraseña", { exact: true }).fill("password1");
-  await page.getByLabel("Confirmar contraseña").fill("password1");
-  await page.getByRole("button", { name: "Registrarme" }).click();
+  await page.getByRole("button", { name: "Crear cuenta" }).click();
 
   await expect(page.getByText("Revisa tu correo para obtener el código de seis dígitos.")).toBeVisible();
   await expect(page.getByLabel("Código de verificación")).toBeVisible();
