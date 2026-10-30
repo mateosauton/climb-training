@@ -23,6 +23,8 @@ insert into public.training_plans (id, athlete_id, version_number, status, ratio
   ('00000000-0000-4000-8000-00000000c111', '00000000-0000-4000-8000-00000000c101', 1, 'draft', 'Plan A.', '{}'::jsonb),
   ('00000000-0000-4000-8000-00000000c112', '00000000-0000-4000-8000-00000000c102', 1, 'draft', 'Plan B.', '{}'::jsonb);
 
+select set_config('private.allow_plan_publication_build', 'on', true);
+
 insert into public.plan_sessions (
   id, plan_id, athlete_id, position, scheduled_offset_days, phase, objective,
   intensity, expected_duration_minutes, recovery_guidance
@@ -32,6 +34,8 @@ insert into public.plan_sessions (
 
 insert into public.plan_blocks (id, session_id, position, phase, title, instructions, duration_minutes) values
   ('00000000-0000-4000-8000-00000000c131', '00000000-0000-4000-8000-00000000c121', 1, 'main', 'Move', 'Move carefully.', 20);
+
+select set_config('private.allow_plan_publication_build', 'off', true);
 
 update public.training_plans
 set status = 'active', published_at = now()

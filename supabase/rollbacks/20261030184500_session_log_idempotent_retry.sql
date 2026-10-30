@@ -1,5 +1,7 @@
 -- Restores the partial session-log idempotency index and the previous hydration payload.
 
+alter function private.normalize_session_log() security invoker;
+
 drop index if exists public.session_logs_athlete_idempotency_key_idx;
 
 create unique index session_logs_athlete_idempotency_key_idx

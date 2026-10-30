@@ -8,6 +8,13 @@ drop index if exists public.session_logs_athlete_idempotency_key_idx;
 create unique index session_logs_athlete_idempotency_key_idx
   on public.session_logs (athlete_id, idempotency_key);
 
+-- The log normalizer calls other private helpers. Authenticated has no
+-- USAGE on schema private (cloud_repository.sql). The trigger runs as its
+-- owner, with an empty search_path, so the insert can normalize without
+-- opening the private schema to the caller. Row level security on the
+-- insert itself still applies to the authenticated role.
+alter function private.normalize_session_log() security definer;
+
 create or replace function public.hydrate_athlete_state()
 returns jsonb
 language sql

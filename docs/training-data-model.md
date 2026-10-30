@@ -67,7 +67,7 @@ The view is `security_invoker`. `anon` has no select. Authenticated athletes sel
 
 `athlete_id` remains the owner. New columns do not add policies. A `plan_session_id` must belong to that athlete; the trigger rejects a cross-athlete id with `23514`. Views do not bypass row level security.
 
-`private` helpers are not exposed to `anon`. Authenticated and `service_role` can execute the normalizers because inserts run as those roles. `private.backfill_training_data_model()` is not granted to them.
+`private` helpers are not exposed to `anon`. Authenticated has no usage on schema `private`. `private.normalize_session_log()` is security definer with an empty search path so an insert can still normalize the row. Row level security on the insert stays with the caller. `private.backfill_training_data_model()` is not granted to authenticated.
 
 ## Retention
 
