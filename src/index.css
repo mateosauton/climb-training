@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/figtree";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -127,6 +128,26 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* Maillon post-login plan surface. Tokens match the Framer color styles:
+   Accent/deep #354A40, Accent/mid #6B7D72, Accent/tint #E7EBE8,
+   Neutral/ground #FBFAF8, Neutral/ink #1A1714. Figtree is the plan face.
+   Auth screens keep the existing app theme. */
+.plan-screen {
+  --plan-deep: #354a40;
+  --plan-mid: #6b7d72;
+  --plan-tint: #e7ebe8;
+  --plan-ground: #fbfaf8;
+  --plan-ink: #1a1714;
+  --plan-muted: #6b6560;
+  --plan-faint: #9a948e;
+  --plan-line: #e6e1db;
+  --plan-surface: #f7f4f0;
+  background: var(--plan-ground);
+  color: var(--plan-ink);
+  color-scheme: light;
+  font-family: "Figtree Variable", Figtree, sans-serif;
 }
 
 @layer base {

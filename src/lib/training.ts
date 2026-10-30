@@ -131,6 +131,7 @@ const boardReferenceImage = `${import.meta.env.BASE_URL}assets/board-frame.png`;
 
 const reference = (label: string, source: string, url: string, image = boardReferenceImage): ExerciseReference => ({ label, source, url, image });
 
+/** Fixed July 2026 template. Demo and development fallback only — never a signed-in athlete plan. */
 export const plan: TrainingSession[] = [
   {
     id: "w1d1",

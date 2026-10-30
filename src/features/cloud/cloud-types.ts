@@ -88,6 +88,11 @@ export type ActivePlanExercise = {
   sets: number | null;
   reps: number | null;
   duration_seconds: number | null;
+  load?: JsonValue;
+  rest_seconds?: number | null;
+  cues?: string[];
+  substitutions?: JsonValue;
+  generator_context?: JsonValue;
 };
 
 export type ActivePlanBlock = {
@@ -97,12 +102,19 @@ export type ActivePlanBlock = {
   title: string;
   instructions: string;
   duration_minutes: number;
+  completion_rules?: JsonValue;
   exercises: ActivePlanExercise[];
 };
 
 export type ActivePlanSession = {
   id: string;
   position: number;
+  scheduled_offset_days?: number;
+  phase?: string;
+  objective?: string;
+  intensity?: string;
+  expected_duration_minutes?: number;
+  recovery_guidance?: string;
   blocks: ActivePlanBlock[];
 };
 
