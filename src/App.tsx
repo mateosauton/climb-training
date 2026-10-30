@@ -140,6 +140,8 @@ import type { CloudRepository } from "@/features/cloud/cloud-repository";
 import type { CloudImport } from "@/features/cloud/cloud-import";
 import { readAuthConfig } from "@/features/auth/auth-config";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
+import { activePlanFromHydration, DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
+import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
 import {
   defaultState,
   exerciseLibrary,
@@ -314,8 +316,8 @@ function makeId() {
   return crypto.randomUUID();
 }
 
-function sessionById(id) {
-  return plan.find((session) => session.id === id) || plan[0];
+function sessionById(sessions, id) {
+  return sessions.find((session) => session.id === id) || sessions[0] || null;
 }
 
 function dateLabel(isoDate) {
@@ -962,14 +964,14 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, cloudStatus, them
   );
 }
 
-function SessionSelect({ value, onChange, id, name = "sessionId", ariaLabel = "Sesion del plan" }) {
+function SessionSelect({ sessions, value, onChange, id, name = "sessionId", ariaLabel = "Sesion del plan" }) {
   return (
     <Select name={name} value={value} onValueChange={onChange}>
       <SelectTrigger id={id} aria-label={ariaLabel} className="h-10 w-full sm:h-8">
         <SelectValue placeholder="Elegir sesion" />
       </SelectTrigger>
       <SelectContent>
-        {plan.map((session) => (
+        {sessions.map((session) => (
           <SelectItem key={session.id} value={session.id}>
             {session.title.replace("Escalada ", "")}
           </SelectItem>
@@ -1036,6 +1038,7 @@ function TrainingSidebar({
   onDateSelect,
   metrics,
   nextSession,
+  sessions,
   weeklyStats,
   activeWeek,
   setActiveWeek,
@@ -1129,7 +1132,8 @@ function TrainingSidebar({
                 type="button"
                 variant="outline"
                 className="min-h-11 justify-start"
-                onClick={() => pickDate(new Date(`${nextSession.date}T12:00:00`))}
+                onClick={() => nextSession && pickDate(new Date(`${nextSession.date}T12:00:00`))}
+                disabled={!nextSession}
               >
                 <Timer className="size-4" />
                 Proxima sesion
@@ -1182,17 +1186,19 @@ function TrainingSidebar({
         <SidebarGroup className="hidden md:block group-data-[collapsible=icon]:hidden">
           <SidebarGroupLabel>Calendario</SidebarGroupLabel>
           <SidebarGroupContent>
+            {sessions.length ? (
             <Calendar
               mode="single"
               selected={selectedDate}
               defaultMonth={selectedDate}
-              startMonth={new Date(`${plan[0].date}T12:00:00`)}
-              endMonth={new Date(`${plan[plan.length - 1].date}T12:00:00`)}
+              startMonth={new Date(`${sessions[0].date}T12:00:00`)}
+              endMonth={new Date(`${sessions[sessions.length - 1].date}T12:00:00`)}
               onSelect={pickDate}
               captionLayout="dropdown"
               locale={es}
               className="bg-transparent p-0 [--cell-size:1.95rem]"
             />
+            ) : <p className="px-2 text-xs text-sidebar-foreground/70">Sin plan activo</p>}
           </SidebarGroupContent>
         </SidebarGroup>
 
@@ -1222,9 +1228,9 @@ function TrainingSidebar({
         <div className="mx-2 mb-2 hidden space-y-3 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3 text-sm md:block group-data-[collapsible=icon]:hidden">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sidebar-foreground/70">Sesiones</span>
-            <Badge variant="outline">{metrics.completed}/28</Badge>
+            <Badge variant="outline">{metrics.completed}/{sessions.length}</Badge>
           </div>
-          <Progress value={(metrics.completed / 28) * 100} />
+          <Progress value={sessions.length ? (metrics.completed / sessions.length) * 100 : 0} />
           <div className="grid grid-cols-2 gap-2 text-xs text-sidebar-foreground/70">
             <span>Link {metrics.bestLink}</span>
             <span>RPE {metrics.avgRpe.toFixed(1)}</span>
@@ -1232,7 +1238,7 @@ function TrainingSidebar({
           <Separator />
           <div>
             <p className="font-medium text-sidebar-foreground">Proxima</p>
-            <p className="mt-1 text-xs text-sidebar-foreground/70">{compactDate(nextSession.date)} · {nextSession.title.replace("Escalada ", "")}</p>
+            <p className="mt-1 text-xs text-sidebar-foreground/70">{nextSession ? `${compactDate(nextSession.date)} · ${nextSession.title.replace("Escalada ", "")}` : "Sin plan activo"}</p>
           </div>
           <Badge
             variant="outline"
@@ -1342,7 +1348,13 @@ export default function App({
   const [theme, setTheme] = useState(loadTheme);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [activeWeek, setActiveWeek] = useState("all");
-  const [selectedSessionId, setSelectedSessionId] = useState("w1d1");
+  const [selectedSessionId, setSelectedSessionId] = useState(() => {
+    if (!cloudVerified) return "w1d1";
+    const resolved = activePlanFromHydration(cloudHydration);
+    return resolved.status === "ready" ? resolved.plan.sessions[0].id : "";
+  });
+  const [liveHydration, setLiveHydration] = useState(null);
+  const [planLoadState, setPlanLoadState] = useState("idle");
   const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
   const [logForm, setLogForm] = useState(defaultLogValues);
   const [logError, setLogError] = useState("");
@@ -1466,6 +1478,27 @@ export default function App({
     };
   }, [videoUrl]);
 
+  const hydration = liveHydration || cloudHydration;
+  const projection = useMemo(
+    () => (cloudVerified ? activePlanFromHydration(hydration) : null),
+    [cloudVerified, hydration]
+  );
+  const sessions = useMemo(
+    () => (!cloudVerified ? plan : projection?.status === "ready" ? projection.plan.sessions : []),
+    [cloudVerified, projection]
+  );
+  const exercisesBySessionId = projection?.status === "ready" ? projection.plan.exercisesBySessionId : null;
+  const guidedDefinitions = !cloudVerified ? guidedSessionDefinitions : projection?.status === "ready" ? projection.plan.guidedDefinitions : {};
+  const planNotice = !cloudVerified
+    ? null
+    : planLoadState === "loading"
+      ? "loading"
+      : planLoadState === "error" || projection?.status === "invalid"
+        ? "error"
+        : projection?.status === "ready"
+          ? null
+          : "empty";
+
   const logsBySession = useMemo(() => {
     const map = new Map();
     state.logs.forEach((log) => {
@@ -1476,8 +1509,13 @@ export default function App({
     return map;
   }, [state.logs]);
 
-  const selectedSession = sessionById(selectedSessionId);
-  const selectedExercises = getSessionExercises(selectedSession);
+  useEffect(() => {
+    if (!sessions.length) return;
+    if (!sessions.some((session) => session.id === selectedSessionId)) setSelectedSessionId(sessions[0].id);
+  }, [sessions, selectedSessionId]);
+
+  const selectedSession = sessionById(sessions, selectedSessionId);
+  const selectedExercises = exercisesBySessionId?.[selectedSession?.id] || (selectedSession && !cloudVerified ? getSessionExercises(selectedSession) : []);
   const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
   const guidedSnapshot = activeUser.guidedSessions;
   const activeGuidedRun = guidedSnapshot.activeRun;
@@ -1486,7 +1524,7 @@ export default function App({
       .filter((run) => run.status === "completed")
       .map((run) => run.sessionId)
   );
-  const selectedGuidedDefinition = guidedSessionDefinitions[selectedSessionId];
+  const selectedGuidedDefinition = guidedDefinitions[selectedSessionId];
   const selectedGuidedRun = activeGuidedRun?.sessionId === selectedSessionId && activeGuidedRun.status !== "completed" ? activeGuidedRun : null;
   const guidedActionLabel = selectedGuidedRun
     ? `Continuar sesión · Bloque ${selectedGuidedRun.currentBlockIndex + 1} de ${selectedGuidedDefinition?.blocks.length || 0}`
@@ -1494,11 +1532,12 @@ export default function App({
   const nextSession = useMemo(() => {
     const todayISO = new Date().toISOString().slice(0, 10);
     return (
-      plan.find((session) => !completedSessionIds.has(session.id) && session.date >= todayISO) ||
-      plan.find((session) => !completedSessionIds.has(session.id)) ||
-      plan[plan.length - 1]
+      sessions.find((session) => !completedSessionIds.has(session.id) && session.date >= todayISO) ||
+      sessions.find((session) => !completedSessionIds.has(session.id)) ||
+      sessions[sessions.length - 1] ||
+      null
     );
-  }, [completedSessionIds]);
+  }, [completedSessionIds, sessions]);
 
   const metrics = useMemo(() => {
     const completed = completedSessionIds.size;
@@ -1508,8 +1547,8 @@ export default function App({
     return { completed, bestLink, avgRpe, avgPain, totalLogs: state.logs.length };
   }, [completedSessionIds, state.logs]);
 
-  const completionPercent = Math.round((metrics.completed / plan.length) * 100);
-  const remainingSessions = Math.max(0, plan.length - metrics.completed);
+  const completionPercent = sessions.length ? Math.round((metrics.completed / sessions.length) * 100) : 0;
+  const remainingSessions = Math.max(0, sessions.length - metrics.completed);
   const latestLoggedSessions = useMemo(() => {
     const seen = new Set();
     return [...state.logs]
@@ -1520,15 +1559,18 @@ export default function App({
         return true;
       })
       .slice(0, 4)
-      .map((log) => ({ log, session: sessionById(log.sessionId) }));
-  }, [state.logs]);
+      .map((log) => ({ log, session: sessionById(sessions, log.sessionId) }))
+      .filter((item) => item.session);
+  }, [sessions, state.logs]);
 
   const weeklyStats = useMemo(() => {
-    return [1, 2, 3, 4].map((week) => {
-      const weekIds = plan.filter((session) => session.week === week).map((session) => session.id);
+    const weeks = [...new Set(sessions.map((session) => session.week))].sort((left, right) => left - right);
+    return weeks.map((week) => {
+      const weekIds = sessions.filter((session) => session.week === week).map((session) => session.id);
       const logs = state.logs.filter((log) => weekIds.includes(log.sessionId));
       return {
         week,
+        planned: weekIds.length,
         sessions: new Set(logs.map((log) => log.sessionId)).size,
         best: Math.max(0, ...logs.map((log) => Number(log.bestLink || 0))),
         rpe: average(logs.map((log) => log.rpe)),
@@ -1537,9 +1579,9 @@ export default function App({
         attempts: logs.reduce((sum, log) => sum + Number(log.attempts || 0), 0)
       };
     });
-  }, [state.logs]);
+  }, [sessions, state.logs]);
 
-  const currentWeekStats = weeklyStats.find((week) => week.week === nextSession.week) || weeklyStats[0];
+  const currentWeekStats = weeklyStats.find((week) => week.week === nextSession?.week) || weeklyStats[0] || { week: 1, planned: 0, sessions: 0, best: 0, rpe: 0, pain: 0, moves: 0, attempts: 0 };
   const recentStats = useMemo(() => {
     const recent = state.logs.slice(-4);
     return {
@@ -1589,7 +1631,7 @@ export default function App({
     [videoValues, recentPain]
   );
   const canShowVideoAdvice = Boolean(videoFile && videoMeta);
-  const selectedDate = useMemo(() => new Date(`${selectedSession.date}T12:00:00`), [selectedSession.date]);
+  const selectedDate = useMemo(() => selectedSession ? new Date(`${selectedSession.date}T12:00:00`) : new Date(), [selectedSession]);
   const activeTabMeta = useMemo(
     () => tabs.find((tab) => tab.value === activeTab) || tabs[0],
     [activeTab]
@@ -1693,6 +1735,20 @@ export default function App({
     }
   }
 
+  async function refreshActivePlan() {
+    if (!cloudRepository?.hydrate) {
+      setPlanLoadState("error");
+      return;
+    }
+    setPlanLoadState("loading");
+    try {
+      setLiveHydration(await cloudRepository.hydrate());
+      setPlanLoadState("idle");
+    } catch {
+      setPlanLoadState("error");
+    }
+  }
+
   async function generateQuestionnairePlan(generation) {
     if (!cloudRepository?.generatePlan || !generation) {
       setQuestionnaireCloudStatus("generation_failed");
@@ -1703,6 +1759,7 @@ export default function App({
       const job = await cloudRepository.generatePlan(generation);
       if (job.status !== "published") throw new Error("plan_generation_failed");
       pendingPlanGeneration.current = null;
+      if (cloudVerified) await refreshActivePlan();
       setQuestionnaireCloudStatus("published");
     } catch {
       setQuestionnaireCloudStatus("generation_failed");
@@ -1804,7 +1861,7 @@ export default function App({
   function handleCalendarDate(date) {
     if (!date) return;
     const isoDate = toIsoDate(date);
-    const session = plan.find((item) => item.date === isoDate);
+    const session = sessions.find((item) => item.date === isoDate);
     if (!session) return;
     setActiveWeek(String(session.week));
     selectSession(session.id, true);
@@ -1877,7 +1934,7 @@ export default function App({
   function selectPlanWeek(week) {
     setActiveWeek(week);
     if (week === "all") return;
-    const firstSession = plan.find((session) => String(session.week) === week);
+    const firstSession = sessions.find((session) => String(session.week) === week);
     if (firstSession) selectSession(firstSession.id, true);
   }
 
@@ -1929,8 +1986,8 @@ export default function App({
         metrics: values,
         binding: resolveSessionLogTarget({
           selectedSessionId,
-          planSessions: cloudHydration?.activePlan?.sessions ?? [],
-          openRun: openRunFromHydration(cloudHydration?.openSessionRun)
+          planSessions: projection?.status === "ready" ? projection.plan.sessions : hydration?.activePlan?.sessions ?? [],
+          openRun: openRunFromHydration(hydration?.openSessionRun)
         }),
         persistEnvelope: (log) => {
           const current = userDataRef.current;
@@ -2191,6 +2248,7 @@ export default function App({
               onDateSelect={handleCalendarDate}
               metrics={metrics}
               nextSession={nextSession}
+              sessions={sessions}
               weeklyStats={weeklyStats}
               activeWeek={activeWeek}
               setActiveWeek={setActiveWeek}
@@ -2247,10 +2305,12 @@ export default function App({
                   </BreadcrumbList>
                 </Breadcrumb>
                 <div className="hidden items-center gap-2 md:flex">
-                  <Badge variant="outline">{metrics.completed}/28 sesiones</Badge>
+                  <Badge variant="outline">{metrics.completed}/{sessions.length} sesiones</Badge>
+                  {nextSession ? (
                   <Badge className={intensityClass(nextSession.intensity)} variant="outline">
                     {compactDate(nextSession.date)} · {nextSession.intensity}
                   </Badge>
+                  ) : null}
                 </div>
                 <ThemeToggle
                   theme={theme}
@@ -2267,6 +2327,10 @@ export default function App({
             <AlertDescription>{userDataWarning}</AlertDescription>
           </Alert>
         ) : null}
+        {!cloudVerified ? (
+          <p className="mb-4 rounded-lg border border-border/70 bg-card/80 px-4 py-3 text-sm" data-testid="demo-plan-banner">{DEMO_PLAN_LABEL}. El calendario de julio 2026 es un ejemplo de desarrollo y no es el plan de un atleta.</p>
+        ) : null}
+        {planNotice && activeTab === "dashboard" ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : null}
 
         <TabsContent value="dashboard" className="mt-0">
           <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -2286,7 +2350,7 @@ export default function App({
                     <p className="text-sm font-medium text-primary">Sesiones completadas</p>
                     <div className="mt-2 flex items-end gap-2">
                       <span className="text-6xl font-semibold leading-none tracking-normal">{metrics.completed}</span>
-                      <span className="pb-1 text-2xl font-semibold text-muted-foreground">/ {plan.length}</span>
+                      <span className="pb-1 text-2xl font-semibold text-muted-foreground">/ {sessions.length}</span>
                     </div>
                     <Progress value={completionPercent} className="mt-4" />
                     <div className="mt-3 flex items-center justify-between gap-3 text-sm">
@@ -2295,7 +2359,9 @@ export default function App({
                     </div>
                     <Button
                       className="mt-4 w-full"
+                      disabled={!nextSession}
                       onClick={() => {
+                        if (!nextSession) return;
                         selectSession(nextSession.id);
                         loadLogForSession(nextSession.id);
                         setActiveTab("log");
@@ -2338,22 +2404,22 @@ export default function App({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="font-semibold">Avance por semana</h3>
-                      <Badge variant="outline">{metrics.completed}/{plan.length}</Badge>
+                      <Badge variant="outline">{metrics.completed}/{sessions.length}</Badge>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                       {weeklyStats.map((week) => (
                         <div key={week.week} className="rounded-lg border border-border/70 bg-background/45 p-3">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-sm font-medium">S{week.week}</p>
-                            <p className="text-sm font-semibold">{week.sessions}/7</p>
+                            <p className="text-sm font-semibold">{week.sessions}/{week.planned}</p>
                           </div>
-                          <Progress value={(week.sessions / 7) * 100} className="mt-2" />
+                          <Progress value={week.planned ? (week.sessions / week.planned) * 100 : 0} className="mt-2" />
                           <p className="mt-2 text-xs text-muted-foreground">Link {week.best} · RPE {week.rpe.toFixed(1)}</p>
                         </div>
                       ))}
                     </div>
                     <div className="grid grid-cols-7 gap-1.5 sm:grid-cols-[repeat(14,minmax(0,1fr))]">
-                      {plan.map((session) => {
+                      {sessions.map((session) => {
                         const done = completedSessionIds.has(session.id);
                         return (
                           <button
@@ -2414,7 +2480,7 @@ export default function App({
             </Card>
 
             <div className="grid gap-4">
-              <Card className="border-border/70 bg-card/90">
+              {nextSession ? <Card className="border-border/70 bg-card/90">
                 <CardHeader className="gap-2 p-4 sm:p-5">
                   <CardTitle className="flex items-center gap-2">
                     <Timer className="size-5 text-primary" />
@@ -2461,7 +2527,7 @@ export default function App({
                     </Button>
                   </div>
                 </CardContent>
-              </Card>
+              </Card> : null}
 
               <Alert role="status" className={cn("border-border/70 bg-card/90", risk.level === "rojo" && "border-red-500/40 bg-red-500/10", risk.level === "ambar" && "border-amber-500/40 bg-amber-500/10", risk.level === "verde" && "border-emerald-500/40 bg-emerald-500/10")}>
                 <ShieldAlert className="size-4" />
@@ -2469,7 +2535,7 @@ export default function App({
                 <AlertDescription>{risk.body}</AlertDescription>
               </Alert>
 
-              <Card className="border-border/70 bg-card/90">
+              {!cloudVerified ? <Card className="border-border/70 bg-card/90">
                 <CardHeader className="gap-3 p-4 sm:p-5">
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">V9 max boulder</Badge>
@@ -2487,15 +2553,15 @@ export default function App({
                       <Film className="size-4" />
                       Analizar video
                     </Button>
-                    <Button variant="ghost" asChild>
+                    {!cloudVerified ? <Button variant="ghost" asChild>
                       <a href={`${import.meta.env.BASE_URL}data/training-plan.md`} target="_blank" rel="noreferrer">
                         <FileText className="size-4" />
                         Plan markdown
                       </a>
-                    </Button>
+                    </Button> : null}
                   </div>
                 </CardHeader>
-              </Card>
+              </Card> : null}
             </div>
           </section>
 
@@ -2519,9 +2585,9 @@ export default function App({
                     <div key={week.week} className="rounded-lg border border-border/70 bg-background/50 p-3">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium">Semana {week.week}</p>
-                        <Badge variant="outline">{week.sessions}/7</Badge>
+                        <Badge variant="outline">{week.sessions}/{week.planned}</Badge>
                       </div>
-                      <Progress value={(week.sessions / 7) * 100} className="mt-3" />
+                      <Progress value={week.planned ? (week.sessions / week.planned) * 100 : 0} className="mt-3" />
                       <p className="mt-2 text-xs text-muted-foreground">Mejor link {week.best} · RPE {week.rpe.toFixed(1)}</p>
                     </div>
                   ))}
@@ -2532,12 +2598,36 @@ export default function App({
         </TabsContent>
 
         <TabsContent value="plan" className="mt-0">
+          {cloudVerified ? (
+            planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
+              <PlanScreen
+                key={projection.plan.planId}
+                planId={projection.plan.planId}
+                sessions={sessions}
+                completedSessionIds={new Set([...completedSessionIds, ...guidedCompletedSessionIds])}
+                today={new Date().toISOString().slice(0, 10)}
+                athleteInitials={(state.profile.name || "E").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E"}
+                resumeLabel={activeGuidedRun?.status === "paused" && guidedDefinitions[activeGuidedRun.sessionId] ? `Continuar sesión · Bloque ${activeGuidedRun.currentBlockIndex + 1} de ${guidedDefinitions[activeGuidedRun.sessionId].blocks.length}` : null}
+                onStartSession={(sessionId) => {
+                  selectSession(sessionId);
+                  setGuidedSessionOpen(true);
+                  const target = sessions.find((session) => session.id === sessionId);
+                  if (target?.planId && cloudRepository?.startSessionRun) void cloudRepository.startSessionRun({ planId: target.planId, planSessionId: sessionId }).catch(() => undefined);
+                }}
+                onResume={() => {
+                  if (activeGuidedRun?.sessionId) selectSession(activeGuidedRun.sessionId);
+                  setGuidedSessionOpen(true);
+                }}
+                onOpenProfile={() => setActiveTab("profile")}
+              />
+            )
+          ) : (
           <section className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[21rem_minmax(0,1fr)]">
-            {activeGuidedRun?.status === "paused" && guidedSessionDefinitions[activeGuidedRun.sessionId] ? (
+            {activeGuidedRun?.status === "paused" && guidedDefinitions[activeGuidedRun.sessionId] ? (
               <div className="lg:col-span-2">
                 <GuidedResumeBanner
-                  session={sessionById(activeGuidedRun.sessionId)}
-                  definition={guidedSessionDefinitions[activeGuidedRun.sessionId]}
+                  session={sessionById(sessions, activeGuidedRun.sessionId)}
+                  definition={guidedDefinitions[activeGuidedRun.sessionId]}
                   run={activeGuidedRun}
                   onResume={() => {
                     selectSession(activeGuidedRun.sessionId);
@@ -2550,7 +2640,7 @@ export default function App({
               <CardHeader className="space-y-3">
                 <div>
                   <CardTitle className="text-lg">Plan por dia</CardTitle>
-                  <CardDescription>{plan.length} sesiones. Los chips abren el primer dia de cada semana.</CardDescription>
+                  <CardDescription>{DEMO_PLAN_LABEL}. {sessions.length} sesiones del ejemplo de julio 2026. Los chips abren el primer dia de cada semana.</CardDescription>
                 </div>
                 <div className="grid grid-cols-5 gap-1.5">
                   {["all", "1", "2", "3", "4"].map((week) => (
@@ -2571,11 +2661,11 @@ export default function App({
               <CardContent>
                 <ScrollArea className="max-h-[28rem] lg:h-[calc(100vh-13rem)] lg:max-h-none">
                   <div className="space-y-2 pr-3">
-                    {plan.map((session, index) => {
+                    {sessions.map((session, index) => {
                       const completed = (logsBySession.get(session.id) || []).length > 0 || guidedCompletedSessionIds.has(session.id);
                       const selected = session.id === selectedSessionId;
                       const weekActive = activeWeek !== "all" && String(session.week) === activeWeek;
-                      const showWeekHeader = index === 0 || plan[index - 1].week !== session.week;
+                      const showWeekHeader = index === 0 || sessions[index - 1].week !== session.week;
                       return (
                         <div key={session.id} className="space-y-2">
                           {showWeekHeader ? (
@@ -2740,9 +2830,11 @@ export default function App({
               </CardContent>
             </Card>
           </section>
+          )}
         </TabsContent>
 
         <TabsContent value="log" className="mt-0">
+          {planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
           <section className="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
@@ -2777,6 +2869,7 @@ export default function App({
                 <form className="space-y-4" onSubmit={submitLog}>
                   <Field label="Dia del plan" htmlFor="log-session" help={logFieldHelp.session}>
                     <SessionSelect
+                      sessions={sessions}
                       id="log-session"
                       name="logSessionId"
                       ariaLabel="Dia del plan para registrar"
@@ -2897,9 +2990,11 @@ export default function App({
               </CardContent>
             </Card>
           </section>
+          )}
         </TabsContent>
 
         <TabsContent value="video" className="mt-0">
+          {planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
           <section className="grid gap-4 xl:grid-cols-[1fr_24rem]">
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-1">
               <Card className="border-border/70 bg-card/90">
@@ -2961,6 +3056,7 @@ export default function App({
                   <form className="space-y-4" onSubmit={saveVideoAnalysis}>
                     <Field label="Sesion asociada" htmlFor="video-session">
                       <SessionSelect
+                        sessions={sessions}
                         id="video-session"
                         name="videoSessionId"
                         ariaLabel="Sesion asociada al video"
@@ -3046,7 +3142,8 @@ export default function App({
                       </div>
                     ) : (
                       [...state.videos].reverse().map((video) => {
-                        const session = sessionById(video.sessionId);
+                        const session = sessionById(sessions, video.sessionId);
+                        if (!session) return null;
                         const firstAdvice = video.advice?.[0];
                         return (
                           <article key={video.id} className="rounded-lg border border-border/70 bg-background/50 p-3">
@@ -3102,6 +3199,7 @@ export default function App({
               </Card>
             </div>
           </section>
+          )}
         </TabsContent>
 
         <TabsContent value="profile" className="mt-0">
@@ -3409,11 +3507,11 @@ export default function App({
             onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           />
         ) : null}
-        {guidedSessionOpen ? (
+        {guidedSessionOpen && selectedSession ? (
           <GuidedSessionFlow
             session={selectedSession}
             definition={selectedGuidedDefinition}
-            definitions={guidedSessionDefinitions}
+            definitions={guidedDefinitions}
             storage={guidedStorage}
             onCloseToPlan={() => {
               setActiveTab("plan");

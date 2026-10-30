@@ -391,7 +391,7 @@ describe("cloud-primary app integration", () => {
 
   it("still sends logs to cloud when local recovery cannot be verified", async () => {
     const user = userEvent.setup();
-    const appendSessionLog = vi.fn(async () => undefined);
+    const appendSessionLog = vi.fn(async (_input: { sessionId?: string; planSessionId?: string }) => undefined);
     const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
     const originalGetItem = Storage.prototype.getItem;
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (key) {
@@ -400,10 +400,24 @@ describe("cloud-primary app integration", () => {
     });
 
     render(<App cloudRepository={cloud} cloudVerified cloudHydration={{
-      facts: [],
+      facts: [{ id: "fact-q", fact_key: "questionnaireCompleted", value: true, source: { type: "import", field: "questionnaireCompleted", version: 1 }, created_at: "2026-11-02T00:00:00.000Z" }],
       sessionLogs: [],
       guided: { schemaVersion: 1, activeRun: null, history: [] },
-      activePlan: null,
+      activePlan: {
+        id: "plan-cloud",
+        published_at: "2026-11-02T00:00:00.000Z",
+        sessions: [{
+          id: "11111111-1111-4111-8111-111111111111",
+          position: 1,
+          scheduled_offset_days: 0,
+          phase: "Fuerza",
+          objective: "Dedos.",
+          intensity: "moderate",
+          expected_duration_minutes: 45,
+          recovery_guidance: "Descanso.",
+          blocks: [{ id: "block-1", position: 1, phase: "work", title: "Fuerza de dedos", instructions: "Control.", duration_minutes: 20, exercises: [] }]
+        }]
+      },
       profile: { avatarPath: null }
     }} />);
 
@@ -412,9 +426,10 @@ describe("cloud-primary app integration", () => {
 
     await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.any(String),
-      sessionBinding: "legacy",
-      sessionId: "w1d1"
+      sessionBinding: "plan",
+      planSessionId: "11111111-1111-4111-8111-111111111111"
     })));
+    expect(appendSessionLog.mock.calls[0]?.[0]?.sessionId).toBeUndefined();
     expect(await screen.findByText("Log guardado")).toBeInTheDocument();
     expect(screen.getByText("El log se guardó en la nube, pero no pudimos verificar la copia en este dispositivo.")).toBeInTheDocument();
   });
