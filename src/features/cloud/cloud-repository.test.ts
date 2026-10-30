@@ -61,7 +61,33 @@ describe("cloud repository", () => {
 
     await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
       facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" },
+      currentProfile: [],
       profile: { avatarPath: "athlete-1/avatar.webp" }
+    });
+  });
+
+  it("keeps the versioned plan read model and current profile projection", async () => {
+    const fake = createFakeClient();
+    const activePlan = {
+      id: "plan-1",
+      read_model_version: 1,
+      version_number: 2,
+      rationale: "Train.",
+      published_at: "2026-10-30T00:00:00.000Z",
+      sessions: [{ id: "session-1", position: 1, blocks: [] }]
+    };
+    const currentProfile = [{
+      fact_key: "heightCm",
+      fact_id: "fact-2",
+      value: 181,
+      source: {},
+      recorded_at: "2026-01-02T00:00:00.000Z"
+    }];
+    fake.rpc.mockResolvedValueOnce({ data: { activePlan, currentProfile }, error: null });
+
+    await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
+      activePlan,
+      currentProfile
     });
   });
 
@@ -94,6 +120,14 @@ describe("cloud repository", () => {
       { table: "session_logs", operation: "upsert", options: { onConflict: "athlete_id,idempotency_key", ignoreDuplicates: true } },
       { table: "athlete_guided_states", operation: "upsert", options: { onConflict: "athlete_id", ignoreDuplicates: false } }
     ]);
+    expect(fake.calls[1]?.value).toEqual({
+      athlete_id: "athlete-1",
+      idempotency_key: "00000000-0000-4000-8000-000000000002",
+      attempts: 4,
+      body: "good",
+      legacy_session_key: "w1d1",
+      session_binding: "legacy"
+    });
   });
   it("uses the authenticated identity for all athlete writes", async () => {
     const fake = createFakeClient();
@@ -199,7 +233,7 @@ describe("cloud repository", () => {
 
     expect(fake.calls).toEqual([
       {
-        table: "training_plans",
+        table: "training_plan_read_model",
         operation: "select",
         filters: [["status", "active"]]
       }
