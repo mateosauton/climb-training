@@ -10,6 +10,7 @@ import type { CloudImport } from "./cloud-import";
 import { migrateLegacyUserData } from "../user-data/user-data-migration";
 import { defaultState } from "../../lib/training";
 import { USER_DATA_STORAGE_KEY } from "../user-data/user-data-storage";
+import { resetSessionLogObserver, setSessionLogObserver } from "./session-log-errors";
 
 const configured = { url: "https://demo.supabase.co", publishableKey: "sb_publishable_demo" };
 
@@ -42,6 +43,7 @@ function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepos
 
 describe("cloud-primary app integration", () => {
   afterEach(() => {
+    resetSessionLogObserver();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -366,7 +368,7 @@ describe("cloud-primary app integration", () => {
   it("sends profile facts and logs to cloud with stable retry keys", async () => {
     const user = userEvent.setup();
     const appendFacts = vi.fn(async () => undefined);
-    const appendSessionLog = vi.fn(async () => undefined);
+    const appendSessionLog = vi.fn(async (_input: { planSessionId?: string; metrics: { sessionId?: string } }) => undefined);
     const cloud = { ...repository(vi.fn(async () => undefined)), appendFacts, appendSessionLog };
     localStorage.setItem("climb4w.state.v1", JSON.stringify({ ...defaultState, profile: { ...defaultState.profile, questionnaireCompleted: true } }));
     render(<App cloudRepository={cloud} />);
@@ -377,7 +379,14 @@ describe("cloud-primary app integration", () => {
     await waitFor(() => expect(appendFacts).toHaveBeenCalled());
     await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
     await user.click(screen.getByRole("button", { name: "Guardar log" }));
-    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: expect.any(String),
+      sessionBinding: "legacy",
+      sessionId: "w1d1"
+    })));
+    const savedLog = appendSessionLog.mock.calls[0]?.[0];
+    expect(savedLog.planSessionId).toBeUndefined();
+    expect(savedLog.metrics.sessionId).toBeUndefined();
   });
 
   it("still sends logs to cloud when local recovery cannot be verified", async () => {
@@ -401,7 +410,82 @@ describe("cloud-primary app integration", () => {
     await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
     await user.click(screen.getByRole("button", { name: "Guardar log" }));
 
-    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: expect.any(String),
+      sessionBinding: "legacy",
+      sessionId: "w1d1"
+    })));
+    expect(await screen.findByText("Log guardado")).toBeInTheDocument();
+    expect(screen.getByText("El log se guardó en la nube, pero no pudimos verificar la copia en este dispositivo.")).toBeInTheDocument();
+  });
+
+  it("keeps a failed cloud log pending and retries the same idempotency key", async () => {
+    const user = userEvent.setup();
+    const seen: Array<{ name: string; code: string; cause: string }> = [];
+    setSessionLogObserver((event) => seen.push(event));
+    const appendSessionLog = vi.fn()
+      .mockRejectedValueOnce({ code: "PGRST301", message: "JWT expired for athlete" })
+      .mockResolvedValueOnce(undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    render(<App cloudRepository={cloud} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
+    expect(await screen.findByRole("button", { name: "Reintentar sincronización" })).toBeInTheDocument();
+    expect(screen.getByText("No pudimos confirmar tu sesión. Volvé a iniciar sesión y reintentá. El log queda pendiente.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/PGRST301|JWT expired/);
+    expect(seen).toEqual([{ name: "session_log_save_failed", code: "unauthenticated", cause: "PGRST301" }]);
+
+    await user.click(screen.getByRole("button", { name: "Reintentar sincronización" }));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledTimes(2));
+    const retryCalls = appendSessionLog.mock.calls as Array<[{ idempotencyKey: string }]>;
+    expect(retryCalls[0]?.[0].idempotencyKey).toBe(retryCalls[1]?.[0].idempotencyKey);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reintentar sincronización" })).not.toBeInTheDocument());
+  });
+
+  it("rejects an invalid log before writing an outbox record or calling the cloud", async () => {
+    const user = userEvent.setup();
+    const appendSessionLog = vi.fn(async () => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    render(<App cloudRepository={cloud} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.clear(document.getElementById("log-rpe") as HTMLInputElement);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
+    expect(await screen.findByText("RPE: usa un valor entre 1 y 10.")).toBeInTheDocument();
+    expect(appendSessionLog).not.toHaveBeenCalled();
+    expect(localStorage.getItem("climb4w.session-log-outbox.v1")).toBeNull();
+  });
+
+  it("links a legacy log to an open run for that same session key", async () => {
+    const user = userEvent.setup();
+    const appendSessionLog = vi.fn(async (_input: { planSessionId?: string }) => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    render(<App cloudRepository={cloud} cloudHydration={{
+      facts: [],
+      sessionLogs: [],
+      guided: { schemaVersion: 1, activeRun: null, history: [] },
+      activePlan: null,
+      openSessionRun: {
+        id: "00000000-0000-4000-8000-000000000341",
+        plan_session_id: null,
+        legacy_session_key: "w1d1",
+        session_binding: "legacy",
+        status: "in_progress"
+      }
+    }} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
+      sessionBinding: "legacy",
+      sessionId: "w1d1",
+      runId: "00000000-0000-4000-8000-000000000341"
+    })));
+    expect(appendSessionLog.mock.calls[0]?.[0].planSessionId).toBeUndefined();
   });
 
   it("persists a cloud-primary profile recovery before reporting a sync warning", async () => {

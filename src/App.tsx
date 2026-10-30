@@ -128,6 +128,10 @@ import { migrateLegacyUserData } from "@/features/user-data/user-data-migration"
 import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
+import { cloudLogSessionId, openRunFromHydration, resolveSessionLogTarget } from "@/features/cloud/session-log-binding";
+import { sessionLogFailureMessage } from "@/features/cloud/session-log-errors";
+import { listPendingSessionLogs } from "@/features/cloud/session-log-outbox";
+import { mergePendingSessionLogs, retryPendingSessionLogs, saveSessionLog } from "@/features/cloud/session-log-save";
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
 import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
@@ -1304,11 +1308,11 @@ export default function App({
         supersedes: fact.supersedes_id || fact.supersedes || null
       }));
       const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
-        id: log.id,
-        sessionId: log.metrics?.sessionId || log.session_id || "w1d1",
+        ...log.metrics,
+        id: typeof log.idempotency_key === "string" ? log.idempotency_key : log.id,
+        sessionId: cloudLogSessionId(log),
         createdAt: log.created_at || log.createdAt,
         notes: log.body || log.metrics?.notes || "",
-        ...log.metrics,
         rpe: log.rpe ?? log.metrics?.rpe ?? 0,
         pump: log.pump ?? log.metrics?.pump ?? 0,
         pain: log.pain ?? log.metrics?.pain ?? 0,
@@ -1318,6 +1322,14 @@ export default function App({
         ...active, facts, sessionLogs,
         guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
       } } };
+    }
+    const pendingLogs = listPendingSessionLogs(localStorage);
+    if (pendingLogs.length) {
+      const active = envelope.users[envelope.activeUserId];
+      const merged = mergePendingSessionLogs(active, pendingLogs);
+      if (merged !== active) {
+        envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: merged } };
+      }
     }
     return { ...loaded, envelope, recoveryEnvelope: loaded.envelope, warning };
   });
@@ -1334,6 +1346,12 @@ export default function App({
   const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
   const [logForm, setLogForm] = useState(defaultLogValues);
   const [logError, setLogError] = useState("");
+  const [logErrorTitle, setLogErrorTitle] = useState("Revisar valor");
+  const [pendingSessionLogs, setPendingSessionLogs] = useState(() => listPendingSessionLogs(localStorage));
+  const [sessionLogSyncMessage, setSessionLogSyncMessage] = useState(() => {
+    const code = listPendingSessionLogs(localStorage)[0]?.lastErrorCode;
+    return code ? sessionLogFailureMessage(code) : "";
+  });
   const [savedRecommendation, setSavedRecommendation] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
@@ -1355,8 +1373,8 @@ export default function App({
   const pendingQuestionnaire = useRef(null);
   const pendingPlanGeneration = useRef(null);
   const pendingFacts = useRef([]);
-  const pendingLog = useRef(null);
   const pendingGuided = useRef(null);
+  const logSaveLock = useRef(false);
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
@@ -1893,53 +1911,87 @@ export default function App({
       const limit = logNumberLimits[field];
       const numeric = Number(logForm[field]);
       if (!Number.isFinite(numeric) || numeric < limit.min || numeric > limit.max) {
+        setLogErrorTitle("Revisar valor");
         setLogError(`${limit.label}: usa un valor entre ${limit.min} y ${limit.max}.`);
         return;
       }
       values[field] = numeric;
     }
-    const log = {
-      id: makeId(),
-      sessionId: selectedSessionId,
-      createdAt: new Date().toISOString(),
-      notes: logForm.notes,
-      ...values
-    };
-    const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
-    const current = userDataRef.current;
-    const userId = current.activeUserId;
-    const nextUser = { ...current.users[userId], sessionLogs: [...current.users[userId].sessionLogs, log] };
-    const next = { ...current, users: { ...current.users, [userId]: nextUser } };
-    const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
-    if (!recovery.ok) {
-      setUserDataWarning(`No pudimos guardar los datos locales: ${recovery.error}`);
-      if (!cloudRepository) return;
-      try {
-        await cloudRepository.appendSessionLog(submission);
-      } catch {
-        setLogError("No pudimos guardar el log. Reintentá en unos segundos.");
+    if (logSaveLock.current) return;
+    logSaveLock.current = true;
+    setLogError("");
+    try {
+      const outcome = await saveSessionLog({
+        storage: localStorage,
+        idempotencyKey: makeId(),
+        createdAt: new Date().toISOString(),
+        notes: logForm.notes,
+        metrics: values,
+        binding: resolveSessionLogTarget({
+          selectedSessionId,
+          planSessions: cloudHydration?.activePlan?.sessions ?? [],
+          openRun: openRunFromHydration(cloudHydration?.openSessionRun)
+        }),
+        persistEnvelope: (log) => {
+          const current = userDataRef.current;
+          const userId = current.activeUserId;
+          const existing = current.users[userId].sessionLogs;
+          const sessionLogs = existing.some((item) => item.id === log.id) ? existing : [...existing, log];
+          const next = { ...current, users: { ...current.users, [userId]: { ...current.users[userId], sessionLogs } } };
+          try {
+            const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+            return { ...recovery, envelope: next };
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : "write", envelope: next };
+          }
+        },
+        appendSessionLog: cloudRepository ? (input) => cloudRepository.appendSessionLog(input) : null
+      });
+      setPendingSessionLogs(listPendingSessionLogs(localStorage));
+      if (outcome.status === "blocked") {
+        setLogErrorTitle("No se envió el log");
+        setLogError(outcome.message);
         return;
       }
-    }
-    userDataRef.current = next;
-    setUserData(next);
-    if (cloudRepository) {
-      pendingLog.current = submission;
-      if (recovery.ok) {
-        void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
-          setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
-        });
-      } else {
-        pendingLog.current = null;
+      userDataRef.current = outcome.envelope;
+      setUserData(outcome.envelope);
+      if (outcome.status === "pending") {
+        setSessionLogSyncMessage(outcome.message);
+        setSavedRecommendation(null);
+        setLogForm(defaultLogValues);
+        return;
       }
+      setSessionLogSyncMessage("");
+      if (outcome.warning) setUserDataWarning(outcome.warning);
+      setSavedRecommendation({
+        log: outcome.log,
+        session: selectedSession,
+        assessment: buildSessionRecommendation(outcome.log, selectedSession)
+      });
+      setLogForm(defaultLogValues);
+    } finally {
+      logSaveLock.current = false;
     }
-    setSavedRecommendation({
-      log,
-      session: selectedSession,
-      assessment: buildSessionRecommendation(log, selectedSession)
-    });
-    setLogForm(defaultLogValues);
-    setLogError("");
+  }
+
+  async function retrySessionLogSync() {
+    if (!cloudRepository || logSaveLock.current) return;
+    logSaveLock.current = true;
+    try {
+      const outcome = await retryPendingSessionLogs({
+        storage: localStorage,
+        appendSessionLog: (input) => cloudRepository.appendSessionLog(input)
+      });
+      const pending = listPendingSessionLogs(localStorage);
+      setPendingSessionLogs(pending);
+      if (outcome.status === "pending") {
+        setSessionLogSyncMessage(outcome.message || sessionLogFailureMessage(outcome.code || "network"));
+        return;
+      }
+      setSessionLogSyncMessage("");
+    } finally {
+      logSaveLock.current = false;
+    }
   }
 
   function clearLogForm() {
@@ -2173,6 +2225,15 @@ export default function App({
                           ? "No pudimos generar tu plan. Intentá nuevamente."
                           : "No pudimos guardar el cuestionario en la nube. Intentá nuevamente."}</p>
                   {questionnaireCloudStatus === "generation_failed" ? <Button type="button" variant="outline" onClick={() => void retryQuestionnaireGeneration()}>Reintentar generación</Button> : null}
+                </div>
+              ) : null}
+              {cloudRepository && pendingSessionLogs.length > 0 ? (
+                <div role="alert" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm md:mx-4">
+                  <div>
+                    <p className="font-medium">Sincronización pendiente</p>
+                    <p className="text-muted-foreground">{sessionLogSyncMessage || "Hay un log pendiente de sincronización con la nube."}</p>
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => void retrySessionLogSync()}>Reintentar sincronización</Button>
                 </div>
               ) : null}
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
@@ -2772,7 +2833,7 @@ export default function App({
                   {logError ? (
                     <Alert className="border-red-500/40 bg-red-500/10">
                       <ShieldAlert className="size-4" />
-                      <AlertTitle>Revisar valor</AlertTitle>
+                      <AlertTitle>{logErrorTitle}</AlertTitle>
                       <AlertDescription>{logError}</AlertDescription>
                     </Alert>
                   ) : null}
