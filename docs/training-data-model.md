@@ -28,6 +28,10 @@ Resolution order for a log or analysis:
 
 `session_runs` do not infer a plan from a free-text key. A legacy run is inserted with `session_binding = 'legacy'`, `legacy_session_key`, and no plan ids. A plan run still requires both `plan_id` and `plan_session_id`.
 
+A client session-log save writes `session_binding` itself. `plan` sends `plan_session_id` and, when an in-progress run for that session is already in `hydrate_athlete_state().openSessionRun`, `run_id`. `legacy` sends `legacy_session_key` and leaves `plan_session_id` empty. `standalone` sends neither key. The legacy key is not stored only inside `metrics`.
+
+`session_logs (athlete_id, idempotency_key)` is a non-partial unique index so `ON CONFLICT (athlete_id, idempotency_key) DO NOTHING` matches it. Null keys stay allowed and distinct. Authenticated athletes can insert and select their own logs; they cannot update them, so a retry ignores the duplicate instead of rewriting the row.
+
 ## Metric names
 
 Known measurements are columns. `metrics jsonb` remains only for keys this model does not standardize. When snake_case and camelCase both exist and differ, the snake_case value is the column and the camelCase value stays in `metric_conflicts`. Equal aliases collapse to the column. Values outside the column range, or non-numeric values, stay in `metric_conflicts` and are not truncated.
@@ -80,7 +84,7 @@ npx supabase@latest db reset --local
 npx supabase@latest test db
 ```
 
-Or, against a database that already has the earlier migrations, run `supabase/tests/training_data_model.sql`. Read `supabase/fixtures/training-data-model-ac02-v1.json` and confirm `plan_session_id` plus the canonical metric names.
+Or, against a database that already has the earlier migrations, run `supabase/tests/training_data_model.sql` and `supabase/tests/session_log_saves.sql`. Read `supabase/fixtures/training-data-model-ac02-v1.json` and confirm `plan_session_id` plus the canonical metric names. Session log retries also need `supabase/migrations/20261030184500_session_log_idempotent_retry.sql` applied.
 
 Rollback is `supabase/rollbacks/20261030172000_canonical_training_data_model.sql`. It copies log and analysis values back into `metrics`, restores the previous hydration, import, and run-ownership functions, then drops the new objects. It stops if a session run is legacy or standalone, or if a video asset still has `legacy_session_key`, because those keys have no older column to return to. Map or remove those rows first. Log and analysis keys are copied back before their columns are dropped.
 

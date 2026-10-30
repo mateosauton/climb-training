@@ -4,12 +4,15 @@ import type {
   CloudRepositoryError,
   FactWrite,
   JsonValue,
+  OpenSessionRun,
   PlanGenerationInput,
   PlanGenerationJob,
   QuestionnaireSubmissionInput,
+  SessionBinding,
   SessionLogInput,
   SessionRunInput
 } from "./cloud-types";
+import { classifySessionLogError } from "./session-log-errors";
 
 type CloudResult<T> = {
   data: T;
@@ -84,6 +87,46 @@ function firstNumber(metrics: SessionLogInput["metrics"], keys: string[]): numbe
   return undefined;
 }
 
+function sessionBindingColumns(
+  input: SessionLogInput,
+  legacyKey: string | undefined,
+  alternate: string | undefined
+): Record<string, JsonValue> {
+  const binding: SessionBinding | undefined = input.sessionBinding;
+  if (binding === "standalone") return { session_binding: "standalone" };
+  if (binding === "plan" && input.planSessionId) {
+    return {
+      plan_session_id: input.planSessionId,
+      session_binding: "plan",
+      ...(alternate === undefined ? {} : { alternate_session_key: alternate })
+    };
+  }
+  if (binding === "legacy" && legacyKey) return { legacy_session_key: legacyKey, session_binding: "legacy" };
+  if (binding === undefined && input.planSessionId !== undefined) {
+    return {
+      plan_session_id: input.planSessionId,
+      session_binding: "plan",
+      ...(alternate === undefined ? {} : { alternate_session_key: alternate })
+    };
+  }
+  if (binding === undefined && legacyKey !== undefined) return { legacy_session_key: legacyKey, session_binding: "legacy" };
+  return {};
+}
+
+function readOpenSessionRun(value: unknown): OpenSessionRun | null {
+  if (!value || typeof value !== "object") return null;
+  const run = value as Partial<OpenSessionRun>;
+  if (typeof run.id !== "string") return null;
+  if (run.session_binding !== "plan" && run.session_binding !== "legacy" && run.session_binding !== "standalone") return null;
+  return {
+    id: run.id,
+    plan_session_id: typeof run.plan_session_id === "string" ? run.plan_session_id : null,
+    legacy_session_key: typeof run.legacy_session_key === "string" ? run.legacy_session_key : null,
+    session_binding: run.session_binding,
+    status: typeof run.status === "string" ? run.status : "in_progress"
+  };
+}
+
 function sessionLogRecord(athlete: string, input: SessionLogInput): Record<string, JsonValue> {
   const metrics = { ...input.metrics };
   const attempts = firstNumber(metrics, ["attempts"]);
@@ -112,6 +155,7 @@ function sessionLogRecord(athlete: string, input: SessionLogInput): Record<strin
     : typeof metrics.session_id === "string" ? metrics.session_id : undefined;
   const legacyKey = input.sessionId ?? metricSession;
   const alternate = input.planSessionId && legacyKey && legacyKey !== input.planSessionId ? legacyKey : undefined;
+  const binding = sessionBindingColumns(input, legacyKey, alternate);
   for (const key of ["attempts", "moves", "best_link", "bestLink", "foot_cuts", "footCuts", "pull_weight", "pullWeight", "sleep", "rpe", "pump", "pain", "energy", "notes", "sessionId", "session_id"]) {
     delete metrics[key];
   }
@@ -119,9 +163,7 @@ function sessionLogRecord(athlete: string, input: SessionLogInput): Record<strin
   return {
     athlete_id: athlete,
     ...(input.runId === undefined ? {} : { run_id: input.runId }),
-    ...(input.planSessionId === undefined ? {} : { plan_session_id: input.planSessionId, session_binding: "plan" }),
-    ...(input.planSessionId === undefined && legacyKey !== undefined ? { legacy_session_key: legacyKey, session_binding: "legacy" } : {}),
-    ...(alternate === undefined ? {} : { alternate_session_key: alternate }),
+    ...binding,
     ...(input.idempotencyKey === undefined ? {} : { idempotency_key: input.idempotencyKey }),
     ...(notes === undefined ? {} : { body: notes }),
     ...(rpe === undefined ? {} : { rpe }),
@@ -156,6 +198,7 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         sessionLogs: Array.isArray(snapshot.sessionLogs) ? snapshot.sessionLogs : [],
         guided: snapshot.guided ?? { schemaVersion: 1, activeRun: null, history: [] },
         activePlan: snapshot.activePlan ?? null,
+        openSessionRun: readOpenSessionRun(snapshot.openSessionRun),
         currentProfile: Array.isArray(snapshot.currentProfile) ? snapshot.currentProfile : [],
         profile: {
           avatarPath: typeof rawProfile?.avatar_path === "string"
@@ -225,12 +268,20 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         last_progress_at: timestamp
       }));
     },
-    async appendSessionLog({ runId, sessionId, planSessionId, idempotencyKey, metrics }) {
-      const id = await athleteId(client);
-      const values = sessionLogRecord(id, { runId, sessionId, planSessionId, idempotencyKey, metrics });
-      await requireSuccess(idempotencyKey === undefined
+    async appendSessionLog(input) {
+      let id: string;
+      try {
+        id = await athleteId(client);
+      } catch (error) {
+        throw classifySessionLogError(error);
+      }
+      const values = sessionLogRecord(id, input);
+      const result = await (input.idempotencyKey === undefined
         ? client.from("session_logs").insert(values)
         : client.from("session_logs").upsert(values, { onConflict: "athlete_id,idempotency_key", ignoreDuplicates: true }));
+      if (!result.error) return;
+      if (typeof result.error === "object" && result.error && (result.error as { code?: unknown }).code === "23505") return;
+      throw classifySessionLogError(result.error);
     }
   };
 }

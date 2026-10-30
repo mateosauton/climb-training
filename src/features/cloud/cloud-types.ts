@@ -17,6 +17,8 @@ export type PlanGenerationJob = {
   status: "published" | "rejected" | "failed" | "provider_not_configured";
 };
 
+export type SessionBinding = "plan" | "legacy" | "standalone";
+
 export type SessionRunInput = {
   planId: string;
   planSessionId: string;
@@ -26,8 +28,17 @@ export type SessionLogInput = {
   runId?: string;
   sessionId?: string;
   planSessionId?: string;
+  sessionBinding?: SessionBinding;
   idempotencyKey?: string;
   metrics: SessionLogMetrics & Record<string, JsonValue | undefined>;
+};
+
+export type OpenSessionRun = {
+  id: string;
+  plan_session_id: string | null;
+  legacy_session_key: string | null;
+  session_binding: SessionBinding;
+  status: string;
 };
 
 export type CloudHydration = {
@@ -35,6 +46,7 @@ export type CloudHydration = {
   sessionLogs: Record<string, JsonValue>[];
   guided: JsonValue;
   activePlan: ActivePlan | null;
+  openSessionRun?: OpenSessionRun | null;
   currentProfile?: CurrentAthleteProfileFact[];
   profile?: CloudProfile;
 };
