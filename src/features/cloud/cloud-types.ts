@@ -24,6 +24,7 @@ export type SessionRunInput = {
 export type SessionLogInput = {
   runId?: string;
   sessionId?: string;
+  planSessionId?: string;
   idempotencyKey?: string;
   metrics: SessionLogMetrics & Record<string, JsonValue | undefined>;
 };
@@ -33,7 +34,16 @@ export type CloudHydration = {
   sessionLogs: Record<string, JsonValue>[];
   guided: JsonValue;
   activePlan: ActivePlan | null;
+  currentProfile?: CurrentAthleteProfileFact[];
   profile?: CloudProfile;
+};
+
+export type CurrentAthleteProfileFact = {
+  fact_key: string;
+  fact_id: string;
+  value: JsonValue;
+  source: JsonValue;
+  recorded_at: string;
 };
 
 export type CloudProfile = {
@@ -57,11 +67,40 @@ export type SessionLogMetrics = {
   notes?: string;
 };
 
+export type ActivePlanExercise = {
+  id: string;
+  position: number;
+  exercise_id: string;
+  exercise_content_version: number;
+  sets: number | null;
+  reps: number | null;
+  duration_seconds: number | null;
+};
+
+export type ActivePlanBlock = {
+  id: string;
+  position: number;
+  phase: string;
+  title: string;
+  instructions: string;
+  duration_minutes: number;
+  exercises: ActivePlanExercise[];
+};
+
+export type ActivePlanSession = {
+  id: string;
+  position: number;
+  blocks: ActivePlanBlock[];
+};
+
 export type ActivePlan = {
   id: string;
   version_number: number;
   rationale: string;
   published_at: string;
+  read_model_version?: number;
+  status?: string;
+  sessions?: ActivePlanSession[];
 };
 
 export type CloudRepositoryError = {
