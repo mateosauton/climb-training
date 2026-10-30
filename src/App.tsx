@@ -139,6 +139,7 @@ import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery"
 import type { CloudRepository } from "@/features/cloud/cloud-repository";
 import type { CloudImport } from "@/features/cloud/cloud-import";
 import { readAuthConfig } from "@/features/auth/auth-config";
+import { appTabForPath } from "@/features/auth/auth-routes";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import { activePlanFromHydration, DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
 import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
@@ -1346,7 +1347,7 @@ export default function App({
   const activeUser = userData.users[userData.activeUserId];
   const state = useMemo(() => projectTrackerState(activeUser), [activeUser]);
   const [theme, setTheme] = useState(loadTheme);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(() => appTabForPath(window.location.pathname));
   const [activeWeek, setActiveWeek] = useState("all");
   const [selectedSessionId, setSelectedSessionId] = useState(() => {
     if (!cloudVerified) return "w1d1";

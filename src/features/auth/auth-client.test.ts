@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     verifyOtp: vi.fn(),
     signInWithPassword: vi.fn(),
     resetPasswordForEmail: vi.fn(),
+    resend: vi.fn(),
     updateUser: vi.fn(),
     signOut: vi.fn(),
     createClient: vi.fn()
@@ -35,6 +36,7 @@ describe("createSupabaseAuthClient", () => {
     mocks.verifyOtp.mockResolvedValue({ data: { session: null }, error: null });
     mocks.signInWithPassword.mockResolvedValue({ data: { session: null }, error: null });
     mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
+    mocks.resend.mockResolvedValue({ error: null });
     mocks.updateUser.mockResolvedValue({ error: null });
     mocks.signOut.mockResolvedValue({ error: null });
   });
@@ -46,6 +48,7 @@ describe("createSupabaseAuthClient", () => {
     await client.verifyEmailCode("user@example.com", "123456");
     await client.signIn("user@example.com", "password1");
     await client.requestPasswordReset("user@example.com", "https://app.test/escalada/");
+    await client.resendConfirmation("user@example.com", "https://app.test/escalada/");
     await client.updatePassword("new-password1");
 
     expect(mocks.signUp).toHaveBeenCalledWith({
@@ -56,6 +59,11 @@ describe("createSupabaseAuthClient", () => {
     expect(mocks.verifyOtp).toHaveBeenCalledWith({ email: "user@example.com", token: "123456", type: "email" });
     expect(mocks.signInWithPassword).toHaveBeenCalledWith({ email: "user@example.com", password: "password1" });
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith("user@example.com", { redirectTo: "https://app.test/escalada/" });
+    expect(mocks.resend).toHaveBeenCalledWith({
+      type: "signup",
+      email: "user@example.com",
+      options: { emailRedirectTo: "https://app.test/escalada/" }
+    });
     expect(mocks.updateUser).toHaveBeenCalledWith({ password: "new-password1" });
   });
 
@@ -100,6 +108,7 @@ describe("createSupabaseAuthClient", () => {
 
   it.each([
     ["invalid_credentials", 400, "invalid_credentials"],
+    ["email_not_confirmed", 400, "email_not_confirmed"],
     ["weak_password", 422, "weak_password"],
     ["over_email_send_rate_limit", 429, "email_rate_limit"],
     ["over_request_rate_limit", 429, "rate_limit"],

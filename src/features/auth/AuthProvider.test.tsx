@@ -18,6 +18,7 @@ function fakeClient(initial: AuthSession = null) {
     verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
+    resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
     signOut: vi.fn(async () => ({ error: null }))
   };
@@ -131,8 +132,8 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
 
-    expect(auth.client.requestPasswordReset).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/");
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
+    expect(auth.client.requestPasswordReset).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/reset/nueva");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si hay una cuenta con ese correo, te enviamos un enlace. Revisa también spam.");
   });
 
   it("keeps password reset non-enumerating when email delivery is rate limited", async () => {
@@ -143,7 +144,7 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
 
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si hay una cuenta con ese correo, te enviamos un enlace. Revisa también spam.");
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("límite temporal");
   });
 
@@ -168,7 +169,7 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "sign in" }));
 
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("El correo o la contraseña no son correctos");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Correo o contraseña incorrectos.");
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("invalid_credentials");
   });
 

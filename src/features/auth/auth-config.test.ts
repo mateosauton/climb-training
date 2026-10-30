@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { authRedirectUrl, readAuthConfig } from "./auth-config";
+import { authRedirectUrl, passwordResetRedirectUrl, readAuthConfig } from "./auth-config";
 
 describe("auth configuration", () => {
   it("accepts complete public configuration", () => {
@@ -19,5 +19,9 @@ describe("auth configuration", () => {
 
   it("returns the Vite base path for auth emails", () => {
     expect(authRedirectUrl("https://climb.example", "/escalada/")).toBe("https://climb.example/escalada/");
+  });
+
+  it("sends password reset emails to the new-password route", () => {
+    expect(passwordResetRedirectUrl("https://climb.example/escalada/")).toBe("https://climb.example/escalada/reset/nueva");
   });
 });
