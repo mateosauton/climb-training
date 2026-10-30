@@ -1,7 +1,7 @@
 import type { GuidedRun, GuidedSessionState } from "../guided-session/guided-session-types";
 import type { UserDataEnvelope, UserRecord } from "./user-data-types";
 
-const APP_NAME = "Escalada 4W Tracker";
+const APP_NAME = "Maillon";
 const PLAN_VERSION = "2026-07-09/2026-08-05";
 
 function guidedRun(run: GuidedRun): GuidedRun {
@@ -65,5 +65,5 @@ export function buildUserDataExport(envelope: UserDataEnvelope, exportedAt: stri
 export function userDataExportFilename(envelope: UserDataEnvelope, exportedAt: string): string {
   const user = envelope.activeUserId.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "user";
   const date = /^\d{4}-\d{2}-\d{2}/.exec(exportedAt)?.[0] ?? "export";
-  return `escalada-4w-user-${user}-${date}.json`;
+  return `maillon-user-${user}-${date}.json`;
 }
