@@ -14,7 +14,7 @@ export type AuthSession = {
 } | null;
 
 export type AuthEvent = AuthChangeEvent;
-export type AuthFailure = "invalid_credentials" | "weak_password" | "email_rate_limit" | "rate_limit" | "expired_link" | "unknown";
+export type AuthFailure = "invalid_credentials" | "email_not_confirmed" | "weak_password" | "email_rate_limit" | "rate_limit" | "expired_link" | "offline" | "unknown";
 export type AuthActionResult = { error: AuthFailure | null };
 export type AuthSessionResult = AuthActionResult & { session: AuthSession };
 
@@ -22,10 +22,17 @@ export interface AuthClient {
   getSession(): Promise<AuthSessionResult>;
   onAuthStateChange(callback: (event: AuthEvent, session: AuthSession) => void): () => void;
   signUp(email: string, password: string, redirectTo: string): Promise<AuthSessionResult>;
+  verifyEmailCode(email: string, code: string): Promise<AuthSessionResult>;
   signIn(email: string, password: string): Promise<AuthSessionResult>;
   requestPasswordReset(email: string, redirectTo: string): Promise<AuthActionResult>;
+  resendConfirmation(email: string, redirectTo: string): Promise<AuthActionResult>;
   updatePassword(password: string): Promise<AuthActionResult>;
   signOut(): Promise<AuthActionResult>;
+}
+
+export function isOfflineError(error: unknown): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  return error instanceof TypeError;
 }
 
 function toSession(session: Session | null): AuthSession {
@@ -34,9 +41,16 @@ function toSession(session: Session | null): AuthSession {
 
 function toFailure(error: AuthError | null): AuthFailure | null {
   if (!error) return null;
+  const message = error.message ?? "";
+  if (
+    error.status === 0
+    || error.name === "AuthRetryableFetchError"
+    || /failed to fetch|networkerror|load failed/i.test(message)
+  ) return "offline";
   if (error.code === "over_email_send_rate_limit") return "email_rate_limit";
   if (error.status === 429 || error.code?.includes("rate_limit")) return "rate_limit";
-  if (error.code === "invalid_credentials" || error.code === "email_not_confirmed") return "invalid_credentials";
+  if (error.code === "email_not_confirmed") return "email_not_confirmed";
+  if (error.code === "invalid_credentials") return "invalid_credentials";
   if (error.code === "weak_password") return "weak_password";
   if (error.code === "otp_expired" || error.code === "flow_state_expired") return "expired_link";
   return "unknown";
@@ -61,12 +75,24 @@ export function createSupabaseAuthClient(config: AuthConfig): AuthClient {
       });
       return { session: toSession(data.session), error: toFailure(error) };
     },
+    async verifyEmailCode(email, code) {
+      const { data, error } = await client.auth.verifyOtp({ email, token: code, type: "email" });
+      return { session: toSession(data.session), error: toFailure(error) };
+    },
     async signIn(email, password) {
       const { data, error } = await client.auth.signInWithPassword({ email, password });
       return { session: toSession(data.session), error: toFailure(error) };
     },
     async requestPasswordReset(email, redirectTo) {
       const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
+      return { error: toFailure(error) };
+    },
+    async resendConfirmation(email, redirectTo) {
+      const { error } = await client.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: redirectTo }
+      });
       return { error: toFailure(error) };
     },
     async updatePassword(password) {

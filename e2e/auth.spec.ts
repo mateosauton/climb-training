@@ -28,8 +28,12 @@ test("authenticated Supabase user keeps one local record across reload", async (
 
 test("sign-out returns to the email gate", async ({ page }) => {
   await page.goto("./");
-  const skipQuestionnaire = page.getByRole("button", { name: "Completar mas tarde" });
-  if (await skipQuestionnaire.isVisible().catch(() => false)) await skipQuestionnaire.click();
+  const questionnaire = page.getByRole("dialog");
+  if (await questionnaire.isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: /^6\./ }).click();
+    await page.getByRole("button", { name: "Guardar cuestionario" }).click();
+    await expect(questionnaire).not.toBeVisible();
+  }
   await openProfile(page);
   await page.getByRole("tab", { name: "Cuenta" }).click();
   await page.getByRole("button", { name: "Cerrar sesión" }).last().click();

@@ -4,12 +4,15 @@ import type {
   CloudRepositoryError,
   FactWrite,
   JsonValue,
+  OpenSessionRun,
   PlanGenerationInput,
   PlanGenerationJob,
   QuestionnaireSubmissionInput,
+  SessionBinding,
   SessionLogInput,
   SessionRunInput
 } from "./cloud-types";
+import { classifySessionLogError } from "./session-log-errors";
 
 type CloudResult<T> = {
   data: T;
@@ -39,7 +42,7 @@ export interface CloudQueryClient {
       options: { onConflict: "athlete_id,idempotency_key" | "id" | "athlete_id"; ignoreDuplicates: boolean }
     ): PromiseLike<CloudResult<unknown>>;
   };
-  from(table: "training_plans"): {
+  from(table: "training_plans" | "training_plan_read_model"): {
     select(columns: string): CloudSelectQuery;
   };
 }
@@ -48,7 +51,7 @@ export type CloudRepository = {
   ensureProfile(): Promise<void>;
   hydrate(): Promise<CloudHydration>;
   saveAvatarPath(path: string | null): Promise<void>;
-  submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<void>;
+  submitQuestionnaire(input: QuestionnaireSubmissionInput): Promise<string>;
   appendFacts(facts: FactWrite[]): Promise<void>;
   saveGuidedState(state: JsonValue, idempotencyKey: string): Promise<void>;
   generatePlan?(input: PlanGenerationInput): Promise<PlanGenerationJob>;
@@ -72,6 +75,112 @@ async function requireSuccess(result: PromiseLike<CloudResult<unknown>>): Promis
   if (error) throw failure("unavailable");
 }
 
+function finiteNumber(value: JsonValue | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function firstNumber(metrics: SessionLogInput["metrics"], keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = finiteNumber(metrics[key]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function sessionBindingColumns(
+  input: SessionLogInput,
+  legacyKey: string | undefined,
+  alternate: string | undefined
+): Record<string, JsonValue> {
+  const binding: SessionBinding | undefined = input.sessionBinding;
+  if (binding === "standalone") return { session_binding: "standalone" };
+  if (binding === "plan" && input.planSessionId) {
+    return {
+      plan_session_id: input.planSessionId,
+      session_binding: "plan",
+      ...(alternate === undefined ? {} : { alternate_session_key: alternate })
+    };
+  }
+  if (binding === "legacy" && legacyKey) return { legacy_session_key: legacyKey, session_binding: "legacy" };
+  if (binding === undefined && input.planSessionId !== undefined) {
+    return {
+      plan_session_id: input.planSessionId,
+      session_binding: "plan",
+      ...(alternate === undefined ? {} : { alternate_session_key: alternate })
+    };
+  }
+  if (binding === undefined && legacyKey !== undefined) return { legacy_session_key: legacyKey, session_binding: "legacy" };
+  return {};
+}
+
+function readOpenSessionRun(value: unknown): OpenSessionRun | null {
+  if (!value || typeof value !== "object") return null;
+  const run = value as Partial<OpenSessionRun>;
+  if (typeof run.id !== "string") return null;
+  if (run.session_binding !== "plan" && run.session_binding !== "legacy" && run.session_binding !== "standalone") return null;
+  return {
+    id: run.id,
+    plan_session_id: typeof run.plan_session_id === "string" ? run.plan_session_id : null,
+    legacy_session_key: typeof run.legacy_session_key === "string" ? run.legacy_session_key : null,
+    session_binding: run.session_binding,
+    status: typeof run.status === "string" ? run.status : "in_progress"
+  };
+}
+
+function sessionLogRecord(athlete: string, input: SessionLogInput): Record<string, JsonValue> {
+  const metrics = { ...input.metrics };
+  const attempts = firstNumber(metrics, ["attempts"]);
+  const moves = firstNumber(metrics, ["moves"]);
+  const bestLink = firstNumber(metrics, ["best_link", "bestLink"]);
+  const footCuts = firstNumber(metrics, ["foot_cuts", "footCuts"]);
+  const pullWeight = firstNumber(metrics, ["pull_weight", "pullWeight"]);
+  const sleep = firstNumber(metrics, ["sleep"]);
+  const conflicts: Record<string, JsonValue> = {};
+  if (finiteNumber(metrics.best_link) !== undefined && finiteNumber(metrics.bestLink) !== undefined && metrics.best_link !== metrics.bestLink) {
+    conflicts.bestLink = metrics.bestLink as number;
+  }
+  if (finiteNumber(metrics.foot_cuts) !== undefined && finiteNumber(metrics.footCuts) !== undefined && metrics.foot_cuts !== metrics.footCuts) {
+    conflicts.footCuts = metrics.footCuts as number;
+  }
+  if (finiteNumber(metrics.pull_weight) !== undefined && finiteNumber(metrics.pullWeight) !== undefined && metrics.pull_weight !== metrics.pullWeight) {
+    conflicts.pullWeight = metrics.pullWeight as number;
+  }
+  const rpe = finiteNumber(metrics.rpe);
+  const pump = finiteNumber(metrics.pump);
+  const pain = finiteNumber(metrics.pain);
+  const energy = finiteNumber(metrics.energy);
+  const notes = typeof metrics.notes === "string" ? metrics.notes : undefined;
+  const metricSession = typeof metrics.sessionId === "string"
+    ? metrics.sessionId
+    : typeof metrics.session_id === "string" ? metrics.session_id : undefined;
+  const legacyKey = input.sessionId ?? metricSession;
+  const alternate = input.planSessionId && legacyKey && legacyKey !== input.planSessionId ? legacyKey : undefined;
+  const binding = sessionBindingColumns(input, legacyKey, alternate);
+  for (const key of ["attempts", "moves", "best_link", "bestLink", "foot_cuts", "footCuts", "pull_weight", "pullWeight", "sleep", "rpe", "pump", "pain", "energy", "notes", "sessionId", "session_id"]) {
+    delete metrics[key];
+  }
+  const extras = Object.fromEntries(Object.entries(metrics).filter((entry): entry is [string, JsonValue] => entry[1] !== undefined));
+  return {
+    athlete_id: athlete,
+    ...(input.runId === undefined ? {} : { run_id: input.runId }),
+    ...binding,
+    ...(input.idempotencyKey === undefined ? {} : { idempotency_key: input.idempotencyKey }),
+    ...(notes === undefined ? {} : { body: notes }),
+    ...(rpe === undefined ? {} : { rpe }),
+    ...(pump === undefined ? {} : { pump }),
+    ...(pain === undefined ? {} : { pain }),
+    ...(energy === undefined ? {} : { energy }),
+    ...(attempts === undefined ? {} : { attempts }),
+    ...(moves === undefined ? {} : { moves }),
+    ...(bestLink === undefined ? {} : { best_link: bestLink }),
+    ...(footCuts === undefined ? {} : { foot_cuts: footCuts }),
+    ...(pullWeight === undefined ? {} : { pull_weight: pullWeight }),
+    ...(sleep === undefined ? {} : { sleep }),
+    ...(Object.keys(extras).length === 0 ? {} : { metrics: extras }),
+    ...(Object.keys(conflicts).length === 0 ? {} : { metric_conflicts: conflicts })
+  };
+}
+
 export function createCloudRepository(client: CloudQueryClient, now = () => new Date().toISOString()): CloudRepository {
   return {
     async ensureProfile() {
@@ -89,6 +198,8 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         sessionLogs: Array.isArray(snapshot.sessionLogs) ? snapshot.sessionLogs : [],
         guided: snapshot.guided ?? { schemaVersion: 1, activeRun: null, history: [] },
         activePlan: snapshot.activePlan ?? null,
+        openSessionRun: readOpenSessionRun(snapshot.openSessionRun),
+        currentProfile: Array.isArray(snapshot.currentProfile) ? snapshot.currentProfile : [],
         profile: {
           avatarPath: typeof rawProfile?.avatar_path === "string"
             ? rawProfile.avatar_path
@@ -100,9 +211,10 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       await athleteId(client);
       await requireSuccess(client.rpc("update_avatar_path", { p_avatar_path: path }));
     },
-    async submitQuestionnaire({ version, answers, idempotencyKey }) {
+    async submitQuestionnaire({ id: questionnaireId, version, answers, idempotencyKey }) {
       const id = await athleteId(client);
       await requireSuccess(client.from("questionnaire_submissions").upsert({
+        id: questionnaireId,
         athlete_id: id,
         answers,
         idempotency_key: idempotencyKey,
@@ -111,6 +223,7 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         onConflict: "athlete_id,idempotency_key",
         ignoreDuplicates: true
       }));
+      return questionnaireId;
     },
     async appendFacts(facts) {
       if (!facts.length) return;
@@ -139,7 +252,7 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
       return data;
     },
     async listActivePlan() {
-      const { data, error } = await client.from("training_plans").select("*").eq("status", "active").maybeSingle();
+      const { data, error } = await client.from("training_plan_read_model").select("*").eq("status", "active").maybeSingle();
       if (error) throw failure("unavailable");
       return data;
     },
@@ -155,23 +268,20 @@ export function createCloudRepository(client: CloudQueryClient, now = () => new 
         last_progress_at: timestamp
       }));
     },
-    async appendSessionLog({ runId, sessionId, idempotencyKey, metrics }) {
-      const id = await athleteId(client);
-      const { rpe, pump, pain, energy, notes } = metrics;
-      const values = {
-        athlete_id: id,
-        ...(runId === undefined ? {} : { run_id: runId }),
-        ...(sessionId === undefined ? {} : { metrics: { ...metrics, sessionId } }),
-        ...(idempotencyKey === undefined ? {} : { idempotency_key: idempotencyKey }),
-        ...(notes === undefined ? {} : { body: notes }),
-        ...(rpe === undefined ? {} : { rpe }),
-        ...(pump === undefined ? {} : { pump }),
-        ...(pain === undefined ? {} : { pain }),
-        ...(energy === undefined ? {} : { energy })
-      };
-      await requireSuccess(idempotencyKey === undefined
+    async appendSessionLog(input) {
+      let id: string;
+      try {
+        id = await athleteId(client);
+      } catch (error) {
+        throw classifySessionLogError(error);
+      }
+      const values = sessionLogRecord(id, input);
+      const result = await (input.idempotencyKey === undefined
         ? client.from("session_logs").insert(values)
         : client.from("session_logs").upsert(values, { onConflict: "athlete_id,idempotency_key", ignoreDuplicates: true }));
+      if (!result.error) return;
+      if (typeof result.error === "object" && result.error && (result.error as { code?: unknown }).code === "23505") return;
+      throw classifySessionLogError(result.error);
     }
   };
 }

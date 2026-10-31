@@ -17,8 +17,10 @@ function fakeClient(initial: AuthSession) {
       return () => undefined;
     }),
     signUp: vi.fn(async () => ({ session: null, error: null })),
+    verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
+    resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
     signOut: vi.fn(async () => {
       current = null;

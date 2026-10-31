@@ -14,7 +14,7 @@ describe("user data export", () => {
     const first = buildUserDataExport(envelope, exportedAt);
     expect(buildUserDataExport(envelope, exportedAt)).toBe(first);
     expect(first).toContain('\n  "schemaVersion": 3,');
-    expect(JSON.parse(first)).toEqual({ ...envelope, app: { name: "Escalada 4W Tracker", exportedAt, planVersion: "2026-07-09/2026-08-05" } });
+    expect(JSON.parse(first)).toEqual({ ...envelope, app: { name: "Maillon", exportedAt, planVersion: "2026-07-09/2026-08-05" } });
     expect(JSON.parse(first).users[envelope.activeUserId].videoAnalyses[0].advice).toEqual([{ title: "Cadera", body: "Acercala al muro." }]);
   });
 
@@ -32,6 +32,6 @@ describe("user data export", () => {
   it("uses the active user and ISO date in the filename", () => {
     let index = 0;
     const envelope = migrateLegacyUserData({ tracker: defaultState, guided: emptyGuidedSessionState(), now: exportedAt, makeId: () => `user:${++index}` });
-    expect(userDataExportFilename(envelope, exportedAt)).toBe("escalada-4w-user-user-1-2026-07-14.json");
+    expect(userDataExportFilename(envelope, exportedAt)).toBe("maillon-user-user-1-2026-07-14.json");
   });
 });

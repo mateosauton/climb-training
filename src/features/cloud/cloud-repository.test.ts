@@ -12,6 +12,7 @@ type Call = {
 
 function createFakeClient() {
   const calls: Call[] = [];
+  let writeError: unknown = null;
   const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
   const invoke = vi.fn().mockResolvedValue({ data: { jobId: "job-1", status: "provider_not_configured" }, error: null });
   const getUser = vi.fn().mockResolvedValue({ data: { user: { id: "athlete-1" } }, error: null });
@@ -25,11 +26,11 @@ function createFakeClient() {
       return {
         insert(value) {
           calls.push({ table, operation: "insert", value, filters });
-          return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: writeError });
         },
         upsert(value, options) {
           calls.push({ table, operation: "upsert", value, options, filters });
-          return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: writeError });
         },
         select() {
           calls.push({ table, operation: "select", filters });
@@ -45,7 +46,7 @@ function createFakeClient() {
     }
   };
 
-  return { client, calls, rpc, getUser, invoke };
+  return { client, calls, rpc, getUser, invoke, setWriteError: (error: unknown) => { writeError = error; } };
 }
 
 describe("cloud repository", () => {
@@ -61,7 +62,34 @@ describe("cloud repository", () => {
 
     await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
       facts: [{ id: "fact-1" }], sessionLogs: [{ id: "log-1" }], activePlan: { id: "plan-1" },
+      openSessionRun: null,
+      currentProfile: [],
       profile: { avatarPath: "athlete-1/avatar.webp" }
+    });
+  });
+
+  it("keeps the versioned plan read model and current profile projection", async () => {
+    const fake = createFakeClient();
+    const activePlan = {
+      id: "plan-1",
+      read_model_version: 1,
+      version_number: 2,
+      rationale: "Train.",
+      published_at: "2026-10-30T00:00:00.000Z",
+      sessions: [{ id: "session-1", position: 1, blocks: [] }]
+    };
+    const currentProfile = [{
+      fact_key: "heightCm",
+      fact_id: "fact-2",
+      value: 181,
+      source: {},
+      recorded_at: "2026-01-02T00:00:00.000Z"
+    }];
+    fake.rpc.mockResolvedValueOnce({ data: { activePlan, currentProfile }, error: null });
+
+    await expect(createCloudRepository(fake.client).hydrate()).resolves.toMatchObject({
+      activePlan,
+      currentProfile
     });
   });
 
@@ -94,13 +122,21 @@ describe("cloud repository", () => {
       { table: "session_logs", operation: "upsert", options: { onConflict: "athlete_id,idempotency_key", ignoreDuplicates: true } },
       { table: "athlete_guided_states", operation: "upsert", options: { onConflict: "athlete_id", ignoreDuplicates: false } }
     ]);
+    expect(fake.calls[1]?.value).toEqual({
+      athlete_id: "athlete-1",
+      idempotency_key: "00000000-0000-4000-8000-000000000002",
+      attempts: 4,
+      body: "good",
+      legacy_session_key: "w1d1",
+      session_binding: "legacy"
+    });
   });
   it("uses the authenticated identity for all athlete writes", async () => {
     const fake = createFakeClient();
     const repository = createCloudRepository(fake.client, () => "2026-07-15T12:00:00.000Z");
 
     await repository.ensureProfile();
-    await repository.submitQuestionnaire({ version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" });
+    await repository.submitQuestionnaire({ id: "00000000-0000-4000-8000-000000000001", version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" });
     await repository.startSessionRun({ planId: "plan-1", planSessionId: "session-1" });
     await repository.appendSessionLog({
       runId: "run-1",
@@ -113,6 +149,7 @@ describe("cloud repository", () => {
         table: "questionnaire_submissions",
         operation: "upsert",
         value: {
+          id: "00000000-0000-4000-8000-000000000001",
           athlete_id: "athlete-1",
           answers: { goal: "boulder" },
           idempotency_key: "questionnaire-1",
@@ -155,16 +192,17 @@ describe("cloud repository", () => {
   it("uses the athlete-scoped unique key to make questionnaire retries safe", async () => {
     const fake = createFakeClient();
     const repository = createCloudRepository(fake.client);
-    const input = { version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" };
+    const input = { id: "00000000-0000-4000-8000-000000000002", version: 2, answers: { goal: "boulder" }, idempotencyKey: "questionnaire-1" };
 
-    await repository.submitQuestionnaire(input);
-    await repository.submitQuestionnaire(input);
+    await expect(repository.submitQuestionnaire(input)).resolves.toBe("00000000-0000-4000-8000-000000000002");
+    await expect(repository.submitQuestionnaire(input)).resolves.toBe("00000000-0000-4000-8000-000000000002");
 
     expect(fake.calls).toEqual([
       {
         table: "questionnaire_submissions",
         operation: "upsert",
         value: {
+          id: "00000000-0000-4000-8000-000000000002",
           athlete_id: "athlete-1",
           answers: { goal: "boulder" },
           idempotency_key: "questionnaire-1",
@@ -177,6 +215,7 @@ describe("cloud repository", () => {
         table: "questionnaire_submissions",
         operation: "upsert",
         value: {
+          id: "00000000-0000-4000-8000-000000000002",
           athlete_id: "athlete-1",
           answers: { goal: "boulder" },
           idempotency_key: "questionnaire-1",
@@ -196,7 +235,7 @@ describe("cloud repository", () => {
 
     expect(fake.calls).toEqual([
       {
-        table: "training_plans",
+        table: "training_plan_read_model",
         operation: "select",
         filters: [["status", "active"]]
       }
@@ -227,12 +266,88 @@ describe("cloud repository", () => {
     const repository = createCloudRepository(fake.client);
 
     await expect(repository.ensureProfile()).rejects.toEqual({ code: "unauthenticated" });
-    await expect(repository.submitQuestionnaire({ version: 2, answers: {}, idempotencyKey: "questionnaire-1" }))
+    await expect(repository.submitQuestionnaire({ id: "00000000-0000-4000-8000-000000000003", version: 2, answers: {}, idempotencyKey: "questionnaire-1" }))
       .rejects.toEqual({ code: "unauthenticated" });
     await expect(repository.startSessionRun({ planId: "plan-1", planSessionId: "session-1" }))
       .rejects.toEqual({ code: "unauthenticated" });
 
     expect(fake.rpc).not.toHaveBeenCalled();
     expect(fake.calls).toEqual([]);
+  });
+
+  it("writes an explicit plan, legacy, or standalone session binding", async () => {
+    const fake = createFakeClient();
+    const repository = createCloudRepository(fake.client);
+    const planId = "00000000-0000-4000-8000-000000000a21";
+    const runId = "00000000-0000-4000-8000-0000000000r1";
+
+    await repository.appendSessionLog({
+      idempotencyKey: "00000000-0000-4000-8000-0000000000c1",
+      sessionBinding: "plan",
+      planSessionId: planId,
+      runId,
+      sessionId: "w2d4",
+      metrics: { attempts: 4, notes: "linked", sessionId: "w2d4" }
+    });
+    await repository.appendSessionLog({
+      idempotencyKey: "00000000-0000-4000-8000-0000000000c2",
+      sessionBinding: "legacy",
+      sessionId: "w2d4",
+      metrics: { attempts: 2, notes: "template" }
+    });
+    await repository.appendSessionLog({
+      idempotencyKey: "00000000-0000-4000-8000-0000000000c3",
+      sessionBinding: "standalone",
+      metrics: { attempts: 1, notes: "free" }
+    });
+
+    expect(fake.calls.map((call) => call.value)).toEqual([
+      {
+        athlete_id: "athlete-1",
+        idempotency_key: "00000000-0000-4000-8000-0000000000c1",
+        plan_session_id: planId,
+        run_id: runId,
+        session_binding: "plan",
+        alternate_session_key: "w2d4",
+        attempts: 4,
+        body: "linked"
+      },
+      {
+        athlete_id: "athlete-1",
+        idempotency_key: "00000000-0000-4000-8000-0000000000c2",
+        legacy_session_key: "w2d4",
+        session_binding: "legacy",
+        attempts: 2,
+        body: "template"
+      },
+      {
+        athlete_id: "athlete-1",
+        idempotency_key: "00000000-0000-4000-8000-0000000000c3",
+        session_binding: "standalone",
+        attempts: 1,
+        body: "free"
+      }
+    ]);
+  });
+
+  it("classifies session log failures and treats a duplicate key as already saved", async () => {
+    const fake = createFakeClient();
+    const repository = createCloudRepository(fake.client);
+    fake.getUser.mockResolvedValueOnce({ data: { user: null }, error: null });
+
+    await expect(repository.appendSessionLog({ idempotencyKey: "00000000-0000-4000-8000-0000000000c4", sessionBinding: "legacy", sessionId: "w2d4", metrics: { attempts: 1 } }))
+      .rejects.toEqual({ code: "unauthenticated", cause: "unauthenticated" });
+
+    fake.setWriteError({ code: "42703", message: "column plan_session_id does not exist" });
+    await expect(repository.appendSessionLog({ idempotencyKey: "00000000-0000-4000-8000-0000000000c4", sessionBinding: "legacy", sessionId: "w2d4", metrics: { attempts: 1 } }))
+      .rejects.toEqual({ code: "schema", cause: "42703" });
+
+    fake.setWriteError({ code: "23514", message: "new row violates check constraint session_logs_attempts_check" });
+    await expect(repository.appendSessionLog({ idempotencyKey: "00000000-0000-4000-8000-0000000000c4", sessionBinding: "legacy", sessionId: "w2d4", metrics: { attempts: 1 } }))
+      .rejects.toEqual({ code: "validation", cause: "23514" });
+
+    fake.setWriteError({ code: "23505", message: "duplicate key value violates unique constraint" });
+    await expect(repository.appendSessionLog({ idempotencyKey: "00000000-0000-4000-8000-0000000000c4", sessionBinding: "legacy", sessionId: "w2d4", metrics: { attempts: 1 } }))
+      .resolves.toBeUndefined();
   });
 });

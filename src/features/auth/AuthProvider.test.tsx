@@ -15,8 +15,10 @@ function fakeClient(initial: AuthSession = null) {
       return unsubscribe;
     }),
     signUp: vi.fn(async () => ({ session: null, error: null })),
+    verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
+    resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
     signOut: vi.fn(async () => ({ error: null }))
   };
@@ -34,10 +36,12 @@ function Probe() {
         error: auth.error,
         notice: auth.notice,
         busy: auth.busy,
-        recoveryMode: auth.recoveryMode
+        recoveryMode: auth.recoveryMode,
+        pendingVerificationEmail: auth.pendingVerificationEmail
       })}</output>
       <button onClick={() => auth.signIn("mateo@example.com", "password1")}>sign in</button>
       <button onClick={() => auth.signUp("mateo@example.com", "password1")}>sign up</button>
+      <button onClick={() => auth.verifyEmailCode("mateo@example.com", "123456")}>verify email code</button>
       <button onClick={() => auth.requestPasswordReset("mateo@example.com")}>reset</button>
       <button onClick={() => auth.updatePassword("new-password1")}>update password</button>
       <button onClick={auth.signOut}>sign out</button>
@@ -100,7 +104,25 @@ describe("AuthProvider", () => {
     await userEvent.click(screen.getByRole("button", { name: "sign up" }));
 
     expect(auth.client.signUp).toHaveBeenCalledWith("mateo@example.com", "password1", "https://example.com/escalada/");
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Revisa tu correo para confirmar tu cuenta");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Revisa tu correo para obtener el código de seis dígitos");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent('"pendingVerificationEmail":"mateo@example.com"');
+  });
+
+  it("verifies a pending email code and uses the returned session", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.verifyEmailCode).mockResolvedValue({
+      session: { user: { id: "verified-user", email: "mateo@example.com" } },
+      error: null
+    });
+    renderProvider(auth);
+    await waitFor(() => expect(screen.getByLabelText("auth-state")).toHaveTextContent('"loading":false'));
+
+    await userEvent.click(screen.getByRole("button", { name: "sign up" }));
+    await userEvent.click(screen.getByRole("button", { name: "verify email code" }));
+
+    expect(auth.client.verifyEmailCode).toHaveBeenCalledWith("mateo@example.com", "123456");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent('"id":"verified-user"');
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent('"pendingVerificationEmail":null');
   });
 
   it("shows a non-enumerating reset notice", async () => {
@@ -110,8 +132,8 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
 
-    expect(auth.client.requestPasswordReset).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/");
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
+    expect(auth.client.requestPasswordReset).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/reset/nueva");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si hay una cuenta con ese correo, te enviamos un enlace. Revisa también spam.");
   });
 
   it("keeps password reset non-enumerating when email delivery is rate limited", async () => {
@@ -122,7 +144,7 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
 
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si existe una cuenta, recibirás un enlace");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Si hay una cuenta con ese correo, te enviamos un enlace. Revisa también spam.");
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("límite temporal");
   });
 
@@ -147,7 +169,7 @@ describe("AuthProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "sign in" }));
 
-    expect(screen.getByLabelText("auth-state")).toHaveTextContent("El correo o la contraseña no son correctos");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Correo o contraseña incorrectos.");
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("invalid_credentials");
   });
 

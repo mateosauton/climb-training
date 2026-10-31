@@ -10,6 +10,7 @@ import type { CloudImport } from "./cloud-import";
 import { migrateLegacyUserData } from "../user-data/user-data-migration";
 import { defaultState } from "../../lib/training";
 import { USER_DATA_STORAGE_KEY } from "../user-data/user-data-storage";
+import { resetSessionLogObserver, setSessionLogObserver } from "./session-log-errors";
 
 const configured = { url: "https://demo.supabase.co", publishableKey: "sb_publishable_demo" };
 
@@ -18,8 +19,10 @@ function authenticatedClient(session: AuthSession): AuthClient {
     getSession: vi.fn(async () => ({ session, error: null })),
     onAuthStateChange: vi.fn(() => () => undefined),
     signUp: vi.fn(async () => ({ session: null, error: null })),
+    verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
+    resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
     signOut: vi.fn(async () => ({ error: null }))
   };
@@ -30,7 +33,7 @@ function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepos
     ensureProfile,
     saveAvatarPath: vi.fn(async () => undefined),
     hydrate: vi.fn(async () => ({ facts: [], sessionLogs: [], guided: { schemaVersion: 1, activeRun: null, history: [] }, activePlan: null })),
-    submitQuestionnaire: vi.fn(async () => undefined),
+    submitQuestionnaire: vi.fn(async () => "00000000-0000-4000-8000-000000000001"),
     appendFacts: vi.fn(async () => undefined),
     saveGuidedState: vi.fn(async () => undefined),
     listActivePlan: vi.fn(async () => null),
@@ -41,6 +44,7 @@ function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepos
 
 describe("cloud-primary app integration", () => {
   afterEach(() => {
+    resetSessionLogObserver();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -166,23 +170,65 @@ describe("cloud-primary app integration", () => {
     expect(screen.getByRole("button", { name: "Reintentar importación" })).toBeInTheDocument();
   });
 
-  it("writes a questionnaire to the cloud with a retry-safe key after saving recovery data", async () => {
+  it("persists a questionnaire before generating its plan", async () => {
     let submitted: Parameters<CloudRepository["submitQuestionnaire"]>[0] | null = null;
-    const submitQuestionnaire = vi.fn(async (input: Parameters<CloudRepository["submitQuestionnaire"]>[0]) => { submitted = input; });
-    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire };
+    const submitQuestionnaire = vi.fn(async (input: Parameters<CloudRepository["submitQuestionnaire"]>[0]) => {
+      submitted = input;
+      return input.id;
+    });
+    const generatePlan = vi.fn(async () => ({ jobId: "job-1", status: "published" as const }));
+    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire, generatePlan };
     render(<App cloudRepository={cloud} />);
 
     await screen.findByRole("button", { name: /^6\./ }).then((button) => button.click());
     await screen.findByRole("button", { name: "Guardar cuestionario" }).then((button) => button.click());
     await waitFor(() => expect(submitQuestionnaire).toHaveBeenCalledTimes(1));
-    expect(submitted).toMatchObject({ version: 2, idempotencyKey: expect.any(String) });
+    expect(submitted).toMatchObject({ id: expect.any(String), version: 2, idempotencyKey: expect.any(String) });
+    await waitFor(() => expect(generatePlan).toHaveBeenCalledWith({
+      questionnaireId: (submitted as NonNullable<typeof submitted>).id,
+      idempotencyKey: expect.any(String)
+    }));
+    expect(await screen.findByText("Tu plan está listo.")).toBeInTheDocument();
   });
 
-  it("disables local-only avatar selection and still lets onboarding finish", async () => {
+  it("keeps a failed plan generation available to retry", async () => {
+    const submitQuestionnaire = vi.fn(async (input: Parameters<CloudRepository["submitQuestionnaire"]>[0]) => input.id);
+    const generatePlan = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ jobId: "job-1", status: "published" as const });
+    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire, generatePlan };
+    const user = userEvent.setup();
+    render(<App cloudRepository={cloud} />);
+
+    await user.click(await screen.findByRole("button", { name: /^6\./ }));
+    await user.click(await screen.findByRole("button", { name: "Guardar cuestionario" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos generar tu plan. Intentá nuevamente.");
+    await user.click(screen.getByRole("button", { name: "Reintentar generación" }));
+    await waitFor(() => expect(generatePlan).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Tu plan está listo.")).toBeInTheDocument();
+  });
+
+  it("does not complete onboarding locally when cloud questionnaire persistence fails", async () => {
+    const submitQuestionnaire = vi.fn(async () => { throw new Error("offline"); });
+    const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire };
+    const first = render(<App cloudRepository={cloud} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
+    expect(await screen.findAllByText("No pudimos guardar el cuestionario en la nube. Intentá nuevamente.")).not.toHaveLength(0);
+    first.unmount();
+
+    render(<App cloudRepository={cloud} />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("disables local-only avatar selection and requires questionnaire submission", async () => {
     render(<App />);
 
     expect(screen.getByLabelText("Foto de perfil")).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Completar mas tarde" }));
+    expect(screen.queryByRole("button", { name: "Completar mas tarde" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -323,7 +369,7 @@ describe("cloud-primary app integration", () => {
   it("sends profile facts and logs to cloud with stable retry keys", async () => {
     const user = userEvent.setup();
     const appendFacts = vi.fn(async () => undefined);
-    const appendSessionLog = vi.fn(async () => undefined);
+    const appendSessionLog = vi.fn(async (_input: { planSessionId?: string; metrics: { sessionId?: string } }) => undefined);
     const cloud = { ...repository(vi.fn(async () => undefined)), appendFacts, appendSessionLog };
     localStorage.setItem("climb4w.state.v1", JSON.stringify({ ...defaultState, profile: { ...defaultState.profile, questionnaireCompleted: true } }));
     render(<App cloudRepository={cloud} />);
@@ -334,12 +380,19 @@ describe("cloud-primary app integration", () => {
     await waitFor(() => expect(appendFacts).toHaveBeenCalled());
     await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
     await user.click(screen.getByRole("button", { name: "Guardar log" }));
-    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: expect.any(String),
+      sessionBinding: "legacy",
+      sessionId: "w1d1"
+    })));
+    const savedLog = appendSessionLog.mock.calls[0]?.[0];
+    expect(savedLog.planSessionId).toBeUndefined();
+    expect(savedLog.metrics.sessionId).toBeUndefined();
   });
 
   it("still sends logs to cloud when local recovery cannot be verified", async () => {
     const user = userEvent.setup();
-    const appendSessionLog = vi.fn(async () => undefined);
+    const appendSessionLog = vi.fn(async (_input: { sessionId?: string; planSessionId?: string }) => undefined);
     const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
     const originalGetItem = Storage.prototype.getItem;
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (key) {
@@ -348,17 +401,107 @@ describe("cloud-primary app integration", () => {
     });
 
     render(<App cloudRepository={cloud} cloudVerified cloudHydration={{
-      facts: [],
+      facts: [{ id: "fact-q", fact_key: "questionnaireCompleted", value: true, source: { type: "import", field: "questionnaireCompleted", version: 1 }, created_at: "2026-11-02T00:00:00.000Z" }],
       sessionLogs: [],
       guided: { schemaVersion: 1, activeRun: null, history: [] },
-      activePlan: null,
+      activePlan: {
+        id: "plan-cloud",
+        published_at: "2026-11-02T00:00:00.000Z",
+        sessions: [{
+          id: "11111111-1111-4111-8111-111111111111",
+          position: 1,
+          scheduled_offset_days: 0,
+          phase: "Fuerza",
+          objective: "Dedos.",
+          intensity: "moderate",
+          expected_duration_minutes: 45,
+          recovery_guidance: "Descanso.",
+          blocks: [{ id: "block-1", position: 1, phase: "work", title: "Fuerza de dedos", instructions: "Control.", duration_minutes: 20, exercises: [] }]
+        }]
+      },
       profile: { avatarPath: null }
     }} />);
 
     await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
     await user.click(screen.getByRole("button", { name: "Guardar log" }));
 
-    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: expect.any(String),
+      sessionBinding: "plan",
+      planSessionId: "11111111-1111-4111-8111-111111111111"
+    })));
+    expect(appendSessionLog.mock.calls[0]?.[0]?.sessionId).toBeUndefined();
+    expect(await screen.findByText("Log guardado")).toBeInTheDocument();
+    expect(screen.getByText("El log se guardó en la nube, pero no pudimos verificar la copia en este dispositivo.")).toBeInTheDocument();
+  });
+
+  it("keeps a failed cloud log pending and retries the same idempotency key", async () => {
+    const user = userEvent.setup();
+    const seen: Array<{ name: string; code: string; cause: string }> = [];
+    setSessionLogObserver((event) => seen.push(event));
+    const appendSessionLog = vi.fn()
+      .mockRejectedValueOnce({ code: "PGRST301", message: "JWT expired for athlete" })
+      .mockResolvedValueOnce(undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    render(<App cloudRepository={cloud} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
+    expect(await screen.findByRole("button", { name: "Reintentar sincronización" })).toBeInTheDocument();
+    expect(screen.getByText("No pudimos confirmar tu sesión. Volvé a iniciar sesión y reintentá. El log queda pendiente.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/PGRST301|JWT expired/);
+    expect(seen).toEqual([{ name: "session_log_save_failed", code: "unauthenticated", cause: "PGRST301" }]);
+
+    await user.click(screen.getByRole("button", { name: "Reintentar sincronización" }));
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledTimes(2));
+    const retryCalls = appendSessionLog.mock.calls as Array<[{ idempotencyKey: string }]>;
+    expect(retryCalls[0]?.[0].idempotencyKey).toBe(retryCalls[1]?.[0].idempotencyKey);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reintentar sincronización" })).not.toBeInTheDocument());
+  });
+
+  it("rejects an invalid log before writing an outbox record or calling the cloud", async () => {
+    const user = userEvent.setup();
+    const appendSessionLog = vi.fn(async () => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    render(<App cloudRepository={cloud} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.clear(document.getElementById("log-rpe") as HTMLInputElement);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
+    expect(await screen.findByText("RPE: usa un valor entre 1 y 10.")).toBeInTheDocument();
+    expect(appendSessionLog).not.toHaveBeenCalled();
+    expect(localStorage.getItem("climb4w.session-log-outbox.v1")).toBeNull();
+  });
+
+  it("links a legacy log to an open run for that same session key", async () => {
+    const user = userEvent.setup();
+    const appendSessionLog = vi.fn(async (_input: { planSessionId?: string }) => undefined);
+    const cloud = { ...repository(vi.fn(async () => undefined)), appendSessionLog };
+    render(<App cloudRepository={cloud} cloudHydration={{
+      facts: [],
+      sessionLogs: [],
+      guided: { schemaVersion: 1, activeRun: null, history: [] },
+      activePlan: null,
+      openSessionRun: {
+        id: "00000000-0000-4000-8000-000000000341",
+        plan_session_id: null,
+        legacy_session_key: "w1d1",
+        session_binding: "legacy",
+        status: "in_progress"
+      }
+    }} />);
+
+    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+
+    await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
+      sessionBinding: "legacy",
+      sessionId: "w1d1",
+      runId: "00000000-0000-4000-8000-000000000341"
+    })));
+    expect(appendSessionLog.mock.calls[0]?.[0].planSessionId).toBeUndefined();
   });
 
   it("persists a cloud-primary profile recovery before reporting a sync warning", async () => {

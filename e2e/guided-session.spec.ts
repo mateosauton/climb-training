@@ -1,9 +1,24 @@
 import { expect, test, type Page } from "@playwright/test";
 
+async function seedCompletedProfile(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem("climb4w.state.v1", JSON.stringify({
+      goals: { currentGrade: "6c", targetGrade: "7a", project: "Moonboard", focus: "Tensión corporal" },
+      profile: {
+        name: "Mateo",
+        questionnaireCompleted: true,
+        questionnaireCompletedAt: "2026-07-10T10:00:00.000Z",
+        questionnaireVersion: 2
+      },
+      logs: [],
+      videos: []
+    }));
+  });
+}
+
 async function openPlan(page: Page) {
+  await seedCompletedProfile(page);
   await page.goto("./");
-  const deferProfile = page.getByRole("button", { name: "Completar mas tarde" });
-  if (await deferProfile.isVisible().catch(() => false)) await deferProfile.click();
   await openTab(page, "Plan");
   await expect(page.getByText("Plan por dia", { exact: true })).toBeVisible();
 }

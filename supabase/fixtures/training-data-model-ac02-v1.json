@@ -1,0 +1,39 @@
+{
+  "id": "training-data-model-ac02-v1",
+  "description": "Canonical session binding and standardized metric names asserted by supabase/tests/training_data_model.sql.",
+  "session_log": {
+    "id": "00000000-0000-4000-8000-00000000ac02",
+    "plan_session_id": null,
+    "session_binding": "legacy",
+    "legacy_session_key": "w1d1",
+    "alternate_session_key": "w1d2",
+    "attempts": 4,
+    "best_link": 2,
+    "metric_conflicts": {
+      "bestLink": 9
+    }
+  },
+  "mapped_session_log": {
+    "plan_session_id": "00000000-0000-4000-8000-000000000a21",
+    "session_binding": "plan",
+    "alternate_session_key": "w1d1",
+    "best_link": 2
+  },
+  "canonical_metric_names": [
+    "attempts",
+    "best_link",
+    "foot_cuts",
+    "moves",
+    "pull_weight",
+    "sleep"
+  ],
+  "video_metric_names": [
+    "breath",
+    "foot_cuts",
+    "hips",
+    "reading",
+    "shoulder",
+    "swing"
+  ],
+  "read_model_version": 1
+}

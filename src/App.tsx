@@ -128,6 +128,10 @@ import { migrateLegacyUserData } from "@/features/user-data/user-data-migration"
 import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
+import { cloudLogSessionId, openRunFromHydration, resolveSessionLogTarget } from "@/features/cloud/session-log-binding";
+import { sessionLogFailureMessage } from "@/features/cloud/session-log-errors";
+import { listPendingSessionLogs } from "@/features/cloud/session-log-outbox";
+import { mergePendingSessionLogs, retryPendingSessionLogs, saveSessionLog } from "@/features/cloud/session-log-save";
 import { createCloudClient } from "@/features/cloud/cloud-client";
 import { createCloudVideoService, videoPath } from "@/features/cloud/cloud-video";
 import { stageLegacyImportVideos } from "@/features/cloud/legacy-video-import";
@@ -135,7 +139,10 @@ import { reconcileUploadedVideoRecovery } from "@/features/cloud/video-recovery"
 import type { CloudRepository } from "@/features/cloud/cloud-repository";
 import type { CloudImport } from "@/features/cloud/cloud-import";
 import { readAuthConfig } from "@/features/auth/auth-config";
+import { appTabForPath } from "@/features/auth/auth-routes";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
+import { activePlanFromHydration, DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
+import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
 import {
   defaultState,
   exerciseLibrary,
@@ -310,8 +317,8 @@ function makeId() {
   return crypto.randomUUID();
 }
 
-function sessionById(id) {
-  return plan.find((session) => session.id === id) || plan[0];
+function sessionById(sessions, id) {
+  return sessions.find((session) => session.id === id) || sessions[0] || null;
 }
 
 function dateLabel(isoDate) {
@@ -831,7 +838,7 @@ function createQuestionnaireFormData(draft) {
   return form;
 }
 
-function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
+function ProfileQuestionnaire({ profile, completion, onSubmit, cloudStatus, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState(() => ({ ...profile }));
   const currentSection = QUESTIONNAIRE_SECTIONS[stepIndex];
@@ -916,6 +923,8 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                 </section>
               ) : null}
               {avatarError ? <p role="alert" className="text-sm text-destructive">{avatarError}</p> : null}
+              {cloudStatus === "saving" ? <p role="status" className="text-sm text-muted-foreground">Guardando tu cuestionario…</p> : null}
+              {cloudStatus === "failed" ? <p role="alert" className="text-sm text-destructive">No pudimos guardar el cuestionario en la nube. Intentá nuevamente.</p> : null}
               <section className="rounded-lg border border-border/70 bg-background/45 p-3 sm:p-4">
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold">{currentSection.title}</h3>
@@ -934,19 +943,16 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
                 </div>
               </section>
               <div className="flex flex-col gap-2 border-t border-border/70 pt-4 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" disabled={avatarSaving} onClick={onSkip}>
-                  Completar mas tarde
-                </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={stepIndex === 0}
+                  disabled={stepIndex === 0 || avatarSaving || cloudStatus === "saving"}
                   onClick={() => setStepIndex((current) => Math.max(0, current - 1))}
                 >
                   <ChevronLeft className="size-4" />
                   Atras
                 </Button>
-                <Button type="submit" disabled={avatarSaving}>
+                <Button type="submit" disabled={avatarSaving || cloudStatus === "saving"}>
                   {isLastStep ? <Save className="size-4" /> : <ChevronRight className="size-4" />}
                   {avatarSaving ? "Guardando foto…" : isLastStep ? "Guardar cuestionario" : "Siguiente"}
                 </Button>
@@ -959,14 +965,14 @@ function ProfileQuestionnaire({ profile, completion, onSubmit, onSkip, theme, on
   );
 }
 
-function SessionSelect({ value, onChange, id, name = "sessionId", ariaLabel = "Sesion del plan" }) {
+function SessionSelect({ sessions, value, onChange, id, name = "sessionId", ariaLabel = "Sesion del plan" }) {
   return (
     <Select name={name} value={value} onValueChange={onChange}>
       <SelectTrigger id={id} aria-label={ariaLabel} className="h-10 w-full sm:h-8">
         <SelectValue placeholder="Elegir sesion" />
       </SelectTrigger>
       <SelectContent>
-        {plan.map((session) => (
+        {sessions.map((session) => (
           <SelectItem key={session.id} value={session.id}>
             {session.title.replace("Escalada ", "")}
           </SelectItem>
@@ -1033,6 +1039,7 @@ function TrainingSidebar({
   onDateSelect,
   metrics,
   nextSession,
+  sessions,
   weeklyStats,
   activeWeek,
   setActiveWeek,
@@ -1126,7 +1133,8 @@ function TrainingSidebar({
                 type="button"
                 variant="outline"
                 className="min-h-11 justify-start"
-                onClick={() => pickDate(new Date(`${nextSession.date}T12:00:00`))}
+                onClick={() => nextSession && pickDate(new Date(`${nextSession.date}T12:00:00`))}
+                disabled={!nextSession}
               >
                 <Timer className="size-4" />
                 Proxima sesion
@@ -1179,17 +1187,19 @@ function TrainingSidebar({
         <SidebarGroup className="hidden md:block group-data-[collapsible=icon]:hidden">
           <SidebarGroupLabel>Calendario</SidebarGroupLabel>
           <SidebarGroupContent>
+            {sessions.length ? (
             <Calendar
               mode="single"
               selected={selectedDate}
               defaultMonth={selectedDate}
-              startMonth={new Date(`${plan[0].date}T12:00:00`)}
-              endMonth={new Date(`${plan[plan.length - 1].date}T12:00:00`)}
+              startMonth={new Date(`${sessions[0].date}T12:00:00`)}
+              endMonth={new Date(`${sessions[sessions.length - 1].date}T12:00:00`)}
               onSelect={pickDate}
               captionLayout="dropdown"
               locale={es}
               className="bg-transparent p-0 [--cell-size:1.95rem]"
             />
+            ) : <p className="px-2 text-xs text-sidebar-foreground/70">Sin plan activo</p>}
           </SidebarGroupContent>
         </SidebarGroup>
 
@@ -1219,9 +1229,9 @@ function TrainingSidebar({
         <div className="mx-2 mb-2 hidden space-y-3 rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3 text-sm md:block group-data-[collapsible=icon]:hidden">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sidebar-foreground/70">Sesiones</span>
-            <Badge variant="outline">{metrics.completed}/28</Badge>
+            <Badge variant="outline">{metrics.completed}/{sessions.length}</Badge>
           </div>
-          <Progress value={(metrics.completed / 28) * 100} />
+          <Progress value={sessions.length ? (metrics.completed / sessions.length) * 100 : 0} />
           <div className="grid grid-cols-2 gap-2 text-xs text-sidebar-foreground/70">
             <span>Link {metrics.bestLink}</span>
             <span>RPE {metrics.avgRpe.toFixed(1)}</span>
@@ -1229,7 +1239,7 @@ function TrainingSidebar({
           <Separator />
           <div>
             <p className="font-medium text-sidebar-foreground">Proxima</p>
-            <p className="mt-1 text-xs text-sidebar-foreground/70">{compactDate(nextSession.date)} · {nextSession.title.replace("Escalada ", "")}</p>
+            <p className="mt-1 text-xs text-sidebar-foreground/70">{nextSession ? `${compactDate(nextSession.date)} · ${nextSession.title.replace("Escalada ", "")}` : "Sin plan activo"}</p>
           </div>
           <Badge
             variant="outline"
@@ -1305,11 +1315,11 @@ export default function App({
         supersedes: fact.supersedes_id || fact.supersedes || null
       }));
       const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
-        id: log.id,
-        sessionId: log.metrics?.sessionId || log.session_id || "w1d1",
+        ...log.metrics,
+        id: typeof log.idempotency_key === "string" ? log.idempotency_key : log.id,
+        sessionId: cloudLogSessionId(log),
         createdAt: log.created_at || log.createdAt,
         notes: log.body || log.metrics?.notes || "",
-        ...log.metrics,
         rpe: log.rpe ?? log.metrics?.rpe ?? 0,
         pump: log.pump ?? log.metrics?.pump ?? 0,
         pain: log.pain ?? log.metrics?.pain ?? 0,
@@ -1320,6 +1330,14 @@ export default function App({
         guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
       } } };
     }
+    const pendingLogs = listPendingSessionLogs(localStorage);
+    if (pendingLogs.length) {
+      const active = envelope.users[envelope.activeUserId];
+      const merged = mergePendingSessionLogs(active, pendingLogs);
+      if (merged !== active) {
+        envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: merged } };
+      }
+    }
     return { ...loaded, envelope, recoveryEnvelope: loaded.envelope, warning };
   });
   const [userData, setUserData] = useState(initialUserLoad.envelope);
@@ -1329,12 +1347,24 @@ export default function App({
   const activeUser = userData.users[userData.activeUserId];
   const state = useMemo(() => projectTrackerState(activeUser), [activeUser]);
   const [theme, setTheme] = useState(loadTheme);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(() => appTabForPath(window.location.pathname));
   const [activeWeek, setActiveWeek] = useState("all");
-  const [selectedSessionId, setSelectedSessionId] = useState("w1d1");
+  const [selectedSessionId, setSelectedSessionId] = useState(() => {
+    if (!cloudVerified) return "w1d1";
+    const resolved = activePlanFromHydration(cloudHydration);
+    return resolved.status === "ready" ? resolved.plan.sessions[0].id : "";
+  });
+  const [liveHydration, setLiveHydration] = useState(null);
+  const [planLoadState, setPlanLoadState] = useState("idle");
   const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
   const [logForm, setLogForm] = useState(defaultLogValues);
   const [logError, setLogError] = useState("");
+  const [logErrorTitle, setLogErrorTitle] = useState("Revisar valor");
+  const [pendingSessionLogs, setPendingSessionLogs] = useState(() => listPendingSessionLogs(localStorage));
+  const [sessionLogSyncMessage, setSessionLogSyncMessage] = useState(() => {
+    const code = listPendingSessionLogs(localStorage)[0]?.lastErrorCode;
+    return code ? sessionLogFailureMessage(code) : "";
+  });
   const [savedRecommendation, setSavedRecommendation] = useState(null);
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
@@ -1354,9 +1384,10 @@ export default function App({
   const [avatarError, setAvatarError] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
   const pendingQuestionnaire = useRef(null);
+  const pendingPlanGeneration = useRef(null);
   const pendingFacts = useRef([]);
-  const pendingLog = useRef(null);
   const pendingGuided = useRef(null);
+  const logSaveLock = useRef(false);
   const [videoStatus, setVideoStatus] = useState({
     tone: "muted",
     title: "Listo para analizar",
@@ -1448,6 +1479,27 @@ export default function App({
     };
   }, [videoUrl]);
 
+  const hydration = liveHydration || cloudHydration;
+  const projection = useMemo(
+    () => (cloudVerified ? activePlanFromHydration(hydration) : null),
+    [cloudVerified, hydration]
+  );
+  const sessions = useMemo(
+    () => (!cloudVerified ? plan : projection?.status === "ready" ? projection.plan.sessions : []),
+    [cloudVerified, projection]
+  );
+  const exercisesBySessionId = projection?.status === "ready" ? projection.plan.exercisesBySessionId : null;
+  const guidedDefinitions = !cloudVerified ? guidedSessionDefinitions : projection?.status === "ready" ? projection.plan.guidedDefinitions : {};
+  const planNotice = !cloudVerified
+    ? null
+    : planLoadState === "loading"
+      ? "loading"
+      : planLoadState === "error" || projection?.status === "invalid"
+        ? "error"
+        : projection?.status === "ready"
+          ? null
+          : "empty";
+
   const logsBySession = useMemo(() => {
     const map = new Map();
     state.logs.forEach((log) => {
@@ -1458,8 +1510,13 @@ export default function App({
     return map;
   }, [state.logs]);
 
-  const selectedSession = sessionById(selectedSessionId);
-  const selectedExercises = getSessionExercises(selectedSession);
+  useEffect(() => {
+    if (!sessions.length) return;
+    if (!sessions.some((session) => session.id === selectedSessionId)) setSelectedSessionId(sessions[0].id);
+  }, [sessions, selectedSessionId]);
+
+  const selectedSession = sessionById(sessions, selectedSessionId);
+  const selectedExercises = exercisesBySessionId?.[selectedSession?.id] || (selectedSession && !cloudVerified ? getSessionExercises(selectedSession) : []);
   const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
   const guidedSnapshot = activeUser.guidedSessions;
   const activeGuidedRun = guidedSnapshot.activeRun;
@@ -1468,7 +1525,7 @@ export default function App({
       .filter((run) => run.status === "completed")
       .map((run) => run.sessionId)
   );
-  const selectedGuidedDefinition = guidedSessionDefinitions[selectedSessionId];
+  const selectedGuidedDefinition = guidedDefinitions[selectedSessionId];
   const selectedGuidedRun = activeGuidedRun?.sessionId === selectedSessionId && activeGuidedRun.status !== "completed" ? activeGuidedRun : null;
   const guidedActionLabel = selectedGuidedRun
     ? `Continuar sesión · Bloque ${selectedGuidedRun.currentBlockIndex + 1} de ${selectedGuidedDefinition?.blocks.length || 0}`
@@ -1476,11 +1533,12 @@ export default function App({
   const nextSession = useMemo(() => {
     const todayISO = new Date().toISOString().slice(0, 10);
     return (
-      plan.find((session) => !completedSessionIds.has(session.id) && session.date >= todayISO) ||
-      plan.find((session) => !completedSessionIds.has(session.id)) ||
-      plan[plan.length - 1]
+      sessions.find((session) => !completedSessionIds.has(session.id) && session.date >= todayISO) ||
+      sessions.find((session) => !completedSessionIds.has(session.id)) ||
+      sessions[sessions.length - 1] ||
+      null
     );
-  }, [completedSessionIds]);
+  }, [completedSessionIds, sessions]);
 
   const metrics = useMemo(() => {
     const completed = completedSessionIds.size;
@@ -1490,8 +1548,8 @@ export default function App({
     return { completed, bestLink, avgRpe, avgPain, totalLogs: state.logs.length };
   }, [completedSessionIds, state.logs]);
 
-  const completionPercent = Math.round((metrics.completed / plan.length) * 100);
-  const remainingSessions = Math.max(0, plan.length - metrics.completed);
+  const completionPercent = sessions.length ? Math.round((metrics.completed / sessions.length) * 100) : 0;
+  const remainingSessions = Math.max(0, sessions.length - metrics.completed);
   const latestLoggedSessions = useMemo(() => {
     const seen = new Set();
     return [...state.logs]
@@ -1502,15 +1560,18 @@ export default function App({
         return true;
       })
       .slice(0, 4)
-      .map((log) => ({ log, session: sessionById(log.sessionId) }));
-  }, [state.logs]);
+      .map((log) => ({ log, session: sessionById(sessions, log.sessionId) }))
+      .filter((item) => item.session);
+  }, [sessions, state.logs]);
 
   const weeklyStats = useMemo(() => {
-    return [1, 2, 3, 4].map((week) => {
-      const weekIds = plan.filter((session) => session.week === week).map((session) => session.id);
+    const weeks = [...new Set(sessions.map((session) => session.week))].sort((left, right) => left - right);
+    return weeks.map((week) => {
+      const weekIds = sessions.filter((session) => session.week === week).map((session) => session.id);
       const logs = state.logs.filter((log) => weekIds.includes(log.sessionId));
       return {
         week,
+        planned: weekIds.length,
         sessions: new Set(logs.map((log) => log.sessionId)).size,
         best: Math.max(0, ...logs.map((log) => Number(log.bestLink || 0))),
         rpe: average(logs.map((log) => log.rpe)),
@@ -1519,9 +1580,9 @@ export default function App({
         attempts: logs.reduce((sum, log) => sum + Number(log.attempts || 0), 0)
       };
     });
-  }, [state.logs]);
+  }, [sessions, state.logs]);
 
-  const currentWeekStats = weeklyStats.find((week) => week.week === nextSession.week) || weeklyStats[0];
+  const currentWeekStats = weeklyStats.find((week) => week.week === nextSession?.week) || weeklyStats[0] || { week: 1, planned: 0, sessions: 0, best: 0, rpe: 0, pain: 0, moves: 0, attempts: 0 };
   const recentStats = useMemo(() => {
     const recent = state.logs.slice(-4);
     return {
@@ -1571,7 +1632,7 @@ export default function App({
     [videoValues, recentPain]
   );
   const canShowVideoAdvice = Boolean(videoFile && videoMeta);
-  const selectedDate = useMemo(() => new Date(`${selectedSession.date}T12:00:00`), [selectedSession.date]);
+  const selectedDate = useMemo(() => selectedSession ? new Date(`${selectedSession.date}T12:00:00`) : new Date(), [selectedSession]);
   const activeTabMeta = useMemo(
     () => tabs.find((tab) => tab.value === activeTab) || tabs[0],
     [activeTab]
@@ -1663,15 +1724,51 @@ export default function App({
   }
 
   async function submitQuestionnaireToCloud(submission) {
-    if (!cloudRepository || !submission) return;
+    if (!cloudRepository || !submission) return null;
     setQuestionnaireCloudStatus("saving");
     try {
-      await cloudRepository.submitQuestionnaire(submission);
+      const questionnaireId = await cloudRepository.submitQuestionnaire(submission);
       pendingQuestionnaire.current = null;
-      setQuestionnaireCloudStatus("saved");
+      return questionnaireId;
     } catch {
       setQuestionnaireCloudStatus("failed");
+      return null;
     }
+  }
+
+  async function refreshActivePlan() {
+    if (!cloudRepository?.hydrate) {
+      setPlanLoadState("error");
+      return;
+    }
+    setPlanLoadState("loading");
+    try {
+      setLiveHydration(await cloudRepository.hydrate());
+      setPlanLoadState("idle");
+    } catch {
+      setPlanLoadState("error");
+    }
+  }
+
+  async function generateQuestionnairePlan(generation) {
+    if (!cloudRepository?.generatePlan || !generation) {
+      setQuestionnaireCloudStatus("generation_failed");
+      return;
+    }
+    setQuestionnaireCloudStatus("generating");
+    try {
+      const job = await cloudRepository.generatePlan(generation);
+      if (job.status !== "published") throw new Error("plan_generation_failed");
+      pendingPlanGeneration.current = null;
+      if (cloudVerified) await refreshActivePlan();
+      setQuestionnaireCloudStatus("published");
+    } catch {
+      setQuestionnaireCloudStatus("generation_failed");
+    }
+  }
+
+  async function retryQuestionnaireGeneration() {
+    await generateQuestionnairePlan(pendingPlanGeneration.current);
   }
 
   async function appendFactsToCloud(facts) {
@@ -1765,7 +1862,7 @@ export default function App({
   function handleCalendarDate(date) {
     if (!date) return;
     const isoDate = toIsoDate(date);
-    const session = plan.find((item) => item.date === isoDate);
+    const session = sessions.find((item) => item.date === isoDate);
     if (!session) return;
     setActiveWeek(String(session.week));
     selectSession(session.id, true);
@@ -1802,6 +1899,19 @@ export default function App({
       questionnaireCompletedAt: now,
       questionnaireVersion: QUESTIONNAIRE_VERSION
     };
+    let generation = null;
+    if (cloudRepository) {
+      const submission = {
+        id: makeId(),
+        version: QUESTIONNAIRE_VERSION,
+        answers: values,
+        idempotencyKey: makeId()
+      };
+      pendingQuestionnaire.current = submission;
+      const questionnaireId = await submitQuestionnaireToCloud(submission);
+      if (!questionnaireId) return;
+      generation = { questionnaireId, idempotencyKey: makeId() };
+    }
     const recoveryPersisted = persistActiveUser((current) => {
       const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
       void appendFactsToCloud(next.facts.slice(current.facts.length));
@@ -1809,36 +1919,9 @@ export default function App({
     });
     if (!recoveryPersisted) return;
     setQuestionnaireOpen(false);
-    if (cloudRepository) {
-      const submission = {
-        version: QUESTIONNAIRE_VERSION,
-        answers: values,
-        idempotencyKey: makeId()
-      };
-      pendingQuestionnaire.current = submission;
-      void submitQuestionnaireToCloud(submission);
-    }
-  }
-
-  async function skipQuestionnaire() {
-    await saveAvatar();
-    const now = new Date().toISOString();
-    const values = {
-      questionnaireCompleted: true,
-      questionnaireCompletedAt: now,
-      questionnaireVersion: QUESTIONNAIRE_VERSION
-    };
-    const recoveryPersisted = persistActiveUser((current) => {
-      const next = appendChangedFacts(current, values, { type: "questionnaire", version: QUESTIONNAIRE_VERSION }, now, makeId);
-      void appendFactsToCloud(next.facts.slice(current.facts.length));
-      return next;
-    });
-    if (!recoveryPersisted) return;
-    setQuestionnaireOpen(false);
-    if (cloudRepository) {
-      const submission = { version: QUESTIONNAIRE_VERSION, answers: values, idempotencyKey: makeId() };
-      pendingQuestionnaire.current = submission;
-      void submitQuestionnaireToCloud(submission);
+    if (generation) {
+      pendingPlanGeneration.current = generation;
+      void generateQuestionnairePlan(generation);
     }
   }
 
@@ -1852,7 +1935,7 @@ export default function App({
   function selectPlanWeek(week) {
     setActiveWeek(week);
     if (week === "all") return;
-    const firstSession = plan.find((session) => String(session.week) === week);
+    const firstSession = sessions.find((session) => String(session.week) === week);
     if (firstSession) selectSession(firstSession.id, true);
   }
 
@@ -1886,53 +1969,87 @@ export default function App({
       const limit = logNumberLimits[field];
       const numeric = Number(logForm[field]);
       if (!Number.isFinite(numeric) || numeric < limit.min || numeric > limit.max) {
+        setLogErrorTitle("Revisar valor");
         setLogError(`${limit.label}: usa un valor entre ${limit.min} y ${limit.max}.`);
         return;
       }
       values[field] = numeric;
     }
-    const log = {
-      id: makeId(),
-      sessionId: selectedSessionId,
-      createdAt: new Date().toISOString(),
-      notes: logForm.notes,
-      ...values
-    };
-    const submission = { idempotencyKey: log.id, sessionId: selectedSessionId, metrics: { ...values, notes: log.notes } };
-    const current = userDataRef.current;
-    const userId = current.activeUserId;
-    const nextUser = { ...current.users[userId], sessionLogs: [...current.users[userId].sessionLogs, log] };
-    const next = { ...current, users: { ...current.users, [userId]: nextUser } };
-    const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
-    if (!recovery.ok) {
-      setUserDataWarning(`No pudimos guardar los datos locales: ${recovery.error}`);
-      if (!cloudRepository) return;
-      try {
-        await cloudRepository.appendSessionLog(submission);
-      } catch {
-        setLogError("No pudimos guardar el log. Reintentá en unos segundos.");
+    if (logSaveLock.current) return;
+    logSaveLock.current = true;
+    setLogError("");
+    try {
+      const outcome = await saveSessionLog({
+        storage: localStorage,
+        idempotencyKey: makeId(),
+        createdAt: new Date().toISOString(),
+        notes: logForm.notes,
+        metrics: values,
+        binding: resolveSessionLogTarget({
+          selectedSessionId,
+          planSessions: projection?.status === "ready" ? projection.plan.sessions : hydration?.activePlan?.sessions ?? [],
+          openRun: openRunFromHydration(hydration?.openSessionRun)
+        }),
+        persistEnvelope: (log) => {
+          const current = userDataRef.current;
+          const userId = current.activeUserId;
+          const existing = current.users[userId].sessionLogs;
+          const sessionLogs = existing.some((item) => item.id === log.id) ? existing : [...existing, log];
+          const next = { ...current, users: { ...current.users, [userId]: { ...current.users[userId], sessionLogs } } };
+          try {
+            const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+            return { ...recovery, envelope: next };
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : "write", envelope: next };
+          }
+        },
+        appendSessionLog: cloudRepository ? (input) => cloudRepository.appendSessionLog(input) : null
+      });
+      setPendingSessionLogs(listPendingSessionLogs(localStorage));
+      if (outcome.status === "blocked") {
+        setLogErrorTitle("No se envió el log");
+        setLogError(outcome.message);
         return;
       }
-    }
-    userDataRef.current = next;
-    setUserData(next);
-    if (cloudRepository) {
-      pendingLog.current = submission;
-      if (recovery.ok) {
-        void cloudRepository.appendSessionLog(submission).then(() => { pendingLog.current = null; }).catch(() => {
-          setUserDataWarning("No pudimos sincronizar el log. Queda guardado para reintentar.");
-        });
-      } else {
-        pendingLog.current = null;
+      userDataRef.current = outcome.envelope;
+      setUserData(outcome.envelope);
+      if (outcome.status === "pending") {
+        setSessionLogSyncMessage(outcome.message);
+        setSavedRecommendation(null);
+        setLogForm(defaultLogValues);
+        return;
       }
+      setSessionLogSyncMessage("");
+      if (outcome.warning) setUserDataWarning(outcome.warning);
+      setSavedRecommendation({
+        log: outcome.log,
+        session: selectedSession,
+        assessment: buildSessionRecommendation(outcome.log, selectedSession)
+      });
+      setLogForm(defaultLogValues);
+    } finally {
+      logSaveLock.current = false;
     }
-    setSavedRecommendation({
-      log,
-      session: selectedSession,
-      assessment: buildSessionRecommendation(log, selectedSession)
-    });
-    setLogForm(defaultLogValues);
-    setLogError("");
+  }
+
+  async function retrySessionLogSync() {
+    if (!cloudRepository || logSaveLock.current) return;
+    logSaveLock.current = true;
+    try {
+      const outcome = await retryPendingSessionLogs({
+        storage: localStorage,
+        appendSessionLog: (input) => cloudRepository.appendSessionLog(input)
+      });
+      const pending = listPendingSessionLogs(localStorage);
+      setPendingSessionLogs(pending);
+      if (outcome.status === "pending") {
+        setSessionLogSyncMessage(outcome.message || sessionLogFailureMessage(outcome.code || "network"));
+        return;
+      }
+      setSessionLogSyncMessage("");
+    } finally {
+      logSaveLock.current = false;
+    }
   }
 
   function clearLogForm() {
@@ -2132,6 +2249,7 @@ export default function App({
               onDateSelect={handleCalendarDate}
               metrics={metrics}
               nextSession={nextSession}
+              sessions={sessions}
               weeklyStats={weeklyStats}
               activeWeek={activeWeek}
               setActiveWeek={setActiveWeek}
@@ -2154,10 +2272,27 @@ export default function App({
                   {importStatus !== "importing" ? <Button type="button" variant="outline" onClick={importLocalRecovery}>{importStatus === "failed" ? "Reintentar importación" : importStatus === "videos_pending" ? "Reintentar videos" : "Importar datos locales"}</Button> : null}
                 </div>
               ) : null}
-              {questionnaireCloudStatus === "saving" || questionnaireCloudStatus === "failed" ? (
-                <div role={questionnaireCloudStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
-                  <p>{questionnaireCloudStatus === "saving" ? "Guardando cuestionario en la nube…" : "No pudimos guardar el cuestionario en la nube. Tus respuestas siguen disponibles para reintentar."}</p>
-                  {questionnaireCloudStatus === "failed" ? <Button type="button" variant="outline" onClick={() => void submitQuestionnaireToCloud(pendingQuestionnaire.current)}>Reintentar cuestionario</Button> : null}
+              {questionnaireCloudStatus !== "idle" ? (
+                <div role={questionnaireCloudStatus === "failed" || questionnaireCloudStatus === "generation_failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
+                  <p>{questionnaireCloudStatus === "saving"
+                    ? "Guardando tu cuestionario…"
+                    : questionnaireCloudStatus === "generating"
+                      ? "Generando tu plan…"
+                      : questionnaireCloudStatus === "published"
+                        ? "Tu plan está listo."
+                        : questionnaireCloudStatus === "generation_failed"
+                          ? "No pudimos generar tu plan. Intentá nuevamente."
+                          : "No pudimos guardar el cuestionario en la nube. Intentá nuevamente."}</p>
+                  {questionnaireCloudStatus === "generation_failed" ? <Button type="button" variant="outline" onClick={() => void retryQuestionnaireGeneration()}>Reintentar generación</Button> : null}
+                </div>
+              ) : null}
+              {cloudRepository && pendingSessionLogs.length > 0 ? (
+                <div role="alert" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm md:mx-4">
+                  <div>
+                    <p className="font-medium">Sincronización pendiente</p>
+                    <p className="text-muted-foreground">{sessionLogSyncMessage || "Hay un log pendiente de sincronización con la nube."}</p>
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => void retrySessionLogSync()}>Reintentar sincronización</Button>
                 </div>
               ) : null}
               <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
@@ -2171,10 +2306,12 @@ export default function App({
                   </BreadcrumbList>
                 </Breadcrumb>
                 <div className="hidden items-center gap-2 md:flex">
-                  <Badge variant="outline">{metrics.completed}/28 sesiones</Badge>
+                  <Badge variant="outline">{metrics.completed}/{sessions.length} sesiones</Badge>
+                  {nextSession ? (
                   <Badge className={intensityClass(nextSession.intensity)} variant="outline">
                     {compactDate(nextSession.date)} · {nextSession.intensity}
                   </Badge>
+                  ) : null}
                 </div>
                 <ThemeToggle
                   theme={theme}
@@ -2191,6 +2328,10 @@ export default function App({
             <AlertDescription>{userDataWarning}</AlertDescription>
           </Alert>
         ) : null}
+        {!cloudVerified ? (
+          <p className="mb-4 rounded-lg border border-border/70 bg-card/80 px-4 py-3 text-sm" data-testid="demo-plan-banner">{DEMO_PLAN_LABEL}. El calendario de julio 2026 es un ejemplo de desarrollo y no es el plan de un atleta.</p>
+        ) : null}
+        {planNotice && activeTab === "dashboard" ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : null}
 
         <TabsContent value="dashboard" className="mt-0">
           <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -2210,7 +2351,7 @@ export default function App({
                     <p className="text-sm font-medium text-primary">Sesiones completadas</p>
                     <div className="mt-2 flex items-end gap-2">
                       <span className="text-6xl font-semibold leading-none tracking-normal">{metrics.completed}</span>
-                      <span className="pb-1 text-2xl font-semibold text-muted-foreground">/ {plan.length}</span>
+                      <span className="pb-1 text-2xl font-semibold text-muted-foreground">/ {sessions.length}</span>
                     </div>
                     <Progress value={completionPercent} className="mt-4" />
                     <div className="mt-3 flex items-center justify-between gap-3 text-sm">
@@ -2219,7 +2360,9 @@ export default function App({
                     </div>
                     <Button
                       className="mt-4 w-full"
+                      disabled={!nextSession}
                       onClick={() => {
+                        if (!nextSession) return;
                         selectSession(nextSession.id);
                         loadLogForSession(nextSession.id);
                         setActiveTab("log");
@@ -2262,22 +2405,22 @@ export default function App({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="font-semibold">Avance por semana</h3>
-                      <Badge variant="outline">{metrics.completed}/{plan.length}</Badge>
+                      <Badge variant="outline">{metrics.completed}/{sessions.length}</Badge>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                       {weeklyStats.map((week) => (
                         <div key={week.week} className="rounded-lg border border-border/70 bg-background/45 p-3">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-sm font-medium">S{week.week}</p>
-                            <p className="text-sm font-semibold">{week.sessions}/7</p>
+                            <p className="text-sm font-semibold">{week.sessions}/{week.planned}</p>
                           </div>
-                          <Progress value={(week.sessions / 7) * 100} className="mt-2" />
+                          <Progress value={week.planned ? (week.sessions / week.planned) * 100 : 0} className="mt-2" />
                           <p className="mt-2 text-xs text-muted-foreground">Link {week.best} · RPE {week.rpe.toFixed(1)}</p>
                         </div>
                       ))}
                     </div>
                     <div className="grid grid-cols-7 gap-1.5 sm:grid-cols-[repeat(14,minmax(0,1fr))]">
-                      {plan.map((session) => {
+                      {sessions.map((session) => {
                         const done = completedSessionIds.has(session.id);
                         return (
                           <button
@@ -2338,7 +2481,7 @@ export default function App({
             </Card>
 
             <div className="grid gap-4">
-              <Card className="border-border/70 bg-card/90">
+              {nextSession ? <Card className="border-border/70 bg-card/90">
                 <CardHeader className="gap-2 p-4 sm:p-5">
                   <CardTitle className="flex items-center gap-2">
                     <Timer className="size-5 text-primary" />
@@ -2385,7 +2528,7 @@ export default function App({
                     </Button>
                   </div>
                 </CardContent>
-              </Card>
+              </Card> : null}
 
               <Alert role="status" className={cn("border-border/70 bg-card/90", risk.level === "rojo" && "border-red-500/40 bg-red-500/10", risk.level === "ambar" && "border-amber-500/40 bg-amber-500/10", risk.level === "verde" && "border-emerald-500/40 bg-emerald-500/10")}>
                 <ShieldAlert className="size-4" />
@@ -2393,7 +2536,7 @@ export default function App({
                 <AlertDescription>{risk.body}</AlertDescription>
               </Alert>
 
-              <Card className="border-border/70 bg-card/90">
+              {!cloudVerified ? <Card className="border-border/70 bg-card/90">
                 <CardHeader className="gap-3 p-4 sm:p-5">
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">V9 max boulder</Badge>
@@ -2411,15 +2554,15 @@ export default function App({
                       <Film className="size-4" />
                       Analizar video
                     </Button>
-                    <Button variant="ghost" asChild>
+                    {!cloudVerified ? <Button variant="ghost" asChild>
                       <a href={`${import.meta.env.BASE_URL}data/training-plan.md`} target="_blank" rel="noreferrer">
                         <FileText className="size-4" />
                         Plan markdown
                       </a>
-                    </Button>
+                    </Button> : null}
                   </div>
                 </CardHeader>
-              </Card>
+              </Card> : null}
             </div>
           </section>
 
@@ -2443,9 +2586,9 @@ export default function App({
                     <div key={week.week} className="rounded-lg border border-border/70 bg-background/50 p-3">
                       <div className="flex items-center justify-between gap-3">
                         <p className="font-medium">Semana {week.week}</p>
-                        <Badge variant="outline">{week.sessions}/7</Badge>
+                        <Badge variant="outline">{week.sessions}/{week.planned}</Badge>
                       </div>
-                      <Progress value={(week.sessions / 7) * 100} className="mt-3" />
+                      <Progress value={week.planned ? (week.sessions / week.planned) * 100 : 0} className="mt-3" />
                       <p className="mt-2 text-xs text-muted-foreground">Mejor link {week.best} · RPE {week.rpe.toFixed(1)}</p>
                     </div>
                   ))}
@@ -2456,12 +2599,36 @@ export default function App({
         </TabsContent>
 
         <TabsContent value="plan" className="mt-0">
+          {cloudVerified ? (
+            planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
+              <PlanScreen
+                key={projection.plan.planId}
+                planId={projection.plan.planId}
+                sessions={sessions}
+                completedSessionIds={new Set([...completedSessionIds, ...guidedCompletedSessionIds])}
+                today={new Date().toISOString().slice(0, 10)}
+                athleteInitials={(state.profile.name || "E").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E"}
+                resumeLabel={activeGuidedRun?.status === "paused" && guidedDefinitions[activeGuidedRun.sessionId] ? `Continuar sesión · Bloque ${activeGuidedRun.currentBlockIndex + 1} de ${guidedDefinitions[activeGuidedRun.sessionId].blocks.length}` : null}
+                onStartSession={(sessionId) => {
+                  selectSession(sessionId);
+                  setGuidedSessionOpen(true);
+                  const target = sessions.find((session) => session.id === sessionId);
+                  if (target?.planId && cloudRepository?.startSessionRun) void cloudRepository.startSessionRun({ planId: target.planId, planSessionId: sessionId }).catch(() => undefined);
+                }}
+                onResume={() => {
+                  if (activeGuidedRun?.sessionId) selectSession(activeGuidedRun.sessionId);
+                  setGuidedSessionOpen(true);
+                }}
+                onOpenProfile={() => setActiveTab("profile")}
+              />
+            )
+          ) : (
           <section className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[21rem_minmax(0,1fr)]">
-            {activeGuidedRun?.status === "paused" && guidedSessionDefinitions[activeGuidedRun.sessionId] ? (
+            {activeGuidedRun?.status === "paused" && guidedDefinitions[activeGuidedRun.sessionId] ? (
               <div className="lg:col-span-2">
                 <GuidedResumeBanner
-                  session={sessionById(activeGuidedRun.sessionId)}
-                  definition={guidedSessionDefinitions[activeGuidedRun.sessionId]}
+                  session={sessionById(sessions, activeGuidedRun.sessionId)}
+                  definition={guidedDefinitions[activeGuidedRun.sessionId]}
                   run={activeGuidedRun}
                   onResume={() => {
                     selectSession(activeGuidedRun.sessionId);
@@ -2474,7 +2641,7 @@ export default function App({
               <CardHeader className="space-y-3">
                 <div>
                   <CardTitle className="text-lg">Plan por dia</CardTitle>
-                  <CardDescription>{plan.length} sesiones. Los chips abren el primer dia de cada semana.</CardDescription>
+                  <CardDescription>{DEMO_PLAN_LABEL}. {sessions.length} sesiones del ejemplo de julio 2026. Los chips abren el primer dia de cada semana.</CardDescription>
                 </div>
                 <div className="grid grid-cols-5 gap-1.5">
                   {["all", "1", "2", "3", "4"].map((week) => (
@@ -2495,11 +2662,11 @@ export default function App({
               <CardContent>
                 <ScrollArea className="max-h-[28rem] lg:h-[calc(100vh-13rem)] lg:max-h-none">
                   <div className="space-y-2 pr-3">
-                    {plan.map((session, index) => {
+                    {sessions.map((session, index) => {
                       const completed = (logsBySession.get(session.id) || []).length > 0 || guidedCompletedSessionIds.has(session.id);
                       const selected = session.id === selectedSessionId;
                       const weekActive = activeWeek !== "all" && String(session.week) === activeWeek;
-                      const showWeekHeader = index === 0 || plan[index - 1].week !== session.week;
+                      const showWeekHeader = index === 0 || sessions[index - 1].week !== session.week;
                       return (
                         <div key={session.id} className="space-y-2">
                           {showWeekHeader ? (
@@ -2664,9 +2831,11 @@ export default function App({
               </CardContent>
             </Card>
           </section>
+          )}
         </TabsContent>
 
         <TabsContent value="log" className="mt-0">
+          {planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
           <section className="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
@@ -2701,6 +2870,7 @@ export default function App({
                 <form className="space-y-4" onSubmit={submitLog}>
                   <Field label="Dia del plan" htmlFor="log-session" help={logFieldHelp.session}>
                     <SessionSelect
+                      sessions={sessions}
                       id="log-session"
                       name="logSessionId"
                       ariaLabel="Dia del plan para registrar"
@@ -2757,7 +2927,7 @@ export default function App({
                   {logError ? (
                     <Alert className="border-red-500/40 bg-red-500/10">
                       <ShieldAlert className="size-4" />
-                      <AlertTitle>Revisar valor</AlertTitle>
+                      <AlertTitle>{logErrorTitle}</AlertTitle>
                       <AlertDescription>{logError}</AlertDescription>
                     </Alert>
                   ) : null}
@@ -2821,9 +2991,11 @@ export default function App({
               </CardContent>
             </Card>
           </section>
+          )}
         </TabsContent>
 
         <TabsContent value="video" className="mt-0">
+          {planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
           <section className="grid gap-4 xl:grid-cols-[1fr_24rem]">
             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-1">
               <Card className="border-border/70 bg-card/90">
@@ -2885,6 +3057,7 @@ export default function App({
                   <form className="space-y-4" onSubmit={saveVideoAnalysis}>
                     <Field label="Sesion asociada" htmlFor="video-session">
                       <SessionSelect
+                        sessions={sessions}
                         id="video-session"
                         name="videoSessionId"
                         ariaLabel="Sesion asociada al video"
@@ -2970,7 +3143,8 @@ export default function App({
                       </div>
                     ) : (
                       [...state.videos].reverse().map((video) => {
-                        const session = sessionById(video.sessionId);
+                        const session = sessionById(sessions, video.sessionId);
+                        if (!session) return null;
                         const firstAdvice = video.advice?.[0];
                         return (
                           <article key={video.id} className="rounded-lg border border-border/70 bg-background/50 p-3">
@@ -3026,6 +3200,7 @@ export default function App({
               </Card>
             </div>
           </section>
+          )}
         </TabsContent>
 
         <TabsContent value="profile" className="mt-0">
@@ -3322,7 +3497,7 @@ export default function App({
             profile={questionnaireProfile}
             completion={questionnaireCompletion}
             onSubmit={saveQuestionnaire}
-            onSkip={skipQuestionnaire}
+            cloudStatus={questionnaireCloudStatus}
             avatarFile={avatarFile}
             onAvatarFileChange={handleAvatarFileChange}
             avatarUrl={avatarUrl}
@@ -3333,11 +3508,11 @@ export default function App({
             onThemeToggle={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
           />
         ) : null}
-        {guidedSessionOpen ? (
+        {guidedSessionOpen && selectedSession ? (
           <GuidedSessionFlow
             session={selectedSession}
             definition={selectedGuidedDefinition}
-            definitions={guidedSessionDefinitions}
+            definitions={guidedDefinitions}
             storage={guidedStorage}
             onCloseToPlan={() => {
               setActiveTab("plan");
