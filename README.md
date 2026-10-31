@@ -1,4 +1,4 @@
-# Escalada 4W Tracker
+# Maillon
 
 App React/Vite con shadcn/ui para seguir el bloque de escalada del 9 de julio al 5 de agosto de 2026.
 
