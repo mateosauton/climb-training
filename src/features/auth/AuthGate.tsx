@@ -247,6 +247,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const resetSent = formScreen === "reset" && auth.notice === AUTH_COPY.resetSent;
   const visibleError = localError ?? auth.error;
   const needsConfirm = visibleError === AUTH_COPY.confirmEmail;
+  const emailAlreadyRegistered = visibleError === AUTH_COPY.emailAlreadyRegistered;
   const showBanner = acceptNext(nextRaw) !== null;
   const title = isNewPassword
     ? AUTH_COPY.newPasswordTitle
@@ -283,7 +284,34 @@ export function AuthGate({ children }: AuthGateProps) {
           <p className="auth-subtitle">{description}</p>
         </header>
 
-        {needsConfirm ? (
+        {emailAlreadyRegistered ? (
+          <div className="auth-error" role="alert">
+            <CircleAlert size={18} aria-hidden="true" />
+            <p>
+              {AUTH_COPY.emailAlreadyRegisteredLead}{" "}
+              <a
+                href={authPath("login", nextRaw)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  openScreen("login");
+                }}
+              >
+                {AUTH_COPY.emailAlreadyRegisteredLogin}
+              </a>
+              {" "}o{" "}
+              <a
+                href={authPath("reset", nextRaw)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  openScreen("reset");
+                }}
+              >
+                {AUTH_COPY.emailAlreadyRegisteredReset}
+              </a>
+              .
+            </p>
+          </div>
+        ) : needsConfirm ? (
           <div className="auth-error" role="alert">
             <CircleAlert size={18} aria-hidden="true" />
             <p>

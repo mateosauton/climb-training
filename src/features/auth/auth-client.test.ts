@@ -106,6 +106,35 @@ describe("createSupabaseAuthClient", () => {
     expect(mocks.unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it("maps a repeated signup returned with HTTP 200", async () => {
+    mocks.signUp.mockResolvedValue({
+      data: { user: null, session: null },
+      error: { code: "user_repeated_signup", status: 200, message: "User already registered" }
+    });
+    const client = createSupabaseAuthClient({ url: "https://project.supabase.co", publishableKey: "public-key" });
+
+    await expect(client.signUp("sautonmateo@gmail.com", "password1", "https://app.test/escalada/")).resolves.toEqual({
+      session: null,
+      error: "email_exists"
+    });
+  });
+
+  it("maps an obfuscated confirmed user to an existing account instead of a silent success", async () => {
+    mocks.signUp.mockResolvedValue({
+      data: {
+        user: { id: "obfuscated-user", email: "sautonmateo@gmail.com", identities: [] },
+        session: null
+      },
+      error: null
+    });
+    const client = createSupabaseAuthClient({ url: "https://project.supabase.co", publishableKey: "public-key" });
+
+    await expect(client.signUp("sautonmateo@gmail.com", "password1", "https://app.test/escalada/")).resolves.toEqual({
+      session: null,
+      error: "email_exists"
+    });
+  });
+
   it.each([
     ["invalid_credentials", 400, "invalid_credentials"],
     ["email_not_confirmed", 400, "email_not_confirmed"],
