@@ -1,5 +1,21 @@
+import type { SessionLog } from "../../lib/training";
 import type { GuidedRun, GuidedSessionState } from "../guided-session/guided-session-types";
 import type { UserDataEnvelope, UserRecord } from "./user-data-types";
+
+const SESSION_LOG_CSV_HEADERS = [
+  "date",
+  "session_id",
+  "rpe",
+  "pain",
+  "best_link",
+  "foot_cuts",
+  "attempts",
+  "moves",
+  "pump",
+  "energy",
+  "sleep",
+  "notes"
+] as const;
 
 const APP_NAME = "Maillon";
 const PLAN_VERSION = "2026-07-09/2026-08-05";
@@ -66,4 +82,43 @@ export function userDataExportFilename(envelope: UserDataEnvelope, exportedAt: s
   const user = envelope.activeUserId.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "user";
   const date = /^\d{4}-\d{2}-\d{2}/.exec(exportedAt)?.[0] ?? "export";
   return `maillon-user-${user}-${date}.json`;
+}
+
+function csvField(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  let text = String(value);
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function metricField(value: number | null | undefined): number | "" {
+  return typeof value === "number" && Number.isFinite(value) ? value : "";
+}
+
+/** Session history for the active athlete. Same rows the JSON backup already contains. */
+export function buildSessionLogsCsv(logs: readonly SessionLog[]): string {
+  const rows = [...logs].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  const lines = [
+    SESSION_LOG_CSV_HEADERS.join(","),
+    ...rows.map((log) => [
+      typeof log.createdAt === "string" ? log.createdAt.slice(0, 10) : "",
+      log.sessionId,
+      metricField(log.rpe),
+      metricField(log.pain),
+      metricField(log.bestLink),
+      metricField(log.footCuts),
+      metricField(log.attempts),
+      metricField(log.moves),
+      metricField(log.pump),
+      metricField(log.energy),
+      metricField(log.sleep),
+      log.notes
+    ].map((value) => csvField(value)).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+export function sessionLogsCsvFilename(envelope: UserDataEnvelope, exportedAt: string): string {
+  return userDataExportFilename(envelope, exportedAt).replace(/\.json$/, ".csv");
 }

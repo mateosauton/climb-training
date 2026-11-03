@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
 const USER_KEY = "climb4w.users.v3";
@@ -78,10 +79,17 @@ test("profile history and export controls remain usable without leaking data", a
   expect(exported).not.toHaveProperty("plan");
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
-  for (const name of ["Copiar JSON", "Descargar", "Borrar datos locales"]) {
-    const action = page.getByRole("button", { name });
+  for (const name of ["Copiar JSON", "Descargar", "Descargar CSV", "Borrar datos locales"]) {
+    const action = page.getByRole("button", { name, exact: true });
     await action.scrollIntoViewIfNeeded();
     await expect(action).toBeInViewport();
   }
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar CSV", exact: true }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^maillon-user-.+\.csv$/);
+  const csv = await readFile(await download.path(), "utf8");
+  expect(csv).toContain("date,session_id,rpe,pain,best_link,foot_cuts,attempts,moves,pump,energy,sleep,notes");
+  expect(csv).toContain("2026-07-10,w1d1,8,0,20,1,12,40,7,8,7,migrated");
   expect(leakedRequests).toEqual([]);
 });

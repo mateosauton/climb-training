@@ -21,6 +21,7 @@ function renderProfile(overrides: Record<string, unknown> = {}) {
       exportJson="{}"
       onCopyJson={() => undefined}
       onDownloadJson={() => undefined}
+      onDownloadCsv={() => undefined}
       onReset={() => undefined}
       onSignOut={() => undefined}
       onOpenQuestionnaire={() => undefined}
