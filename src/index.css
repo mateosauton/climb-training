@@ -143,6 +143,7 @@ body {
   --plan-faint: #9a948e;
   --plan-line: #e6e1db;
   --plan-surface: #f7f4f0;
+  --plan-warn: #f4f0e4;
   background: var(--plan-ground);
   color: var(--plan-ink);
   color-scheme: light;
