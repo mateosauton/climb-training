@@ -144,12 +144,19 @@ import type { CloudImport } from "@/features/cloud/cloud-import";
 import { readAuthConfig } from "@/features/auth/auth-config";
 import { appTabForPath } from "@/features/auth/auth-routes";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
+import {
+  advancedLogFields,
+  dayLogFormValues,
+  metricsFromLogForm,
+  quickLogFields,
+  quickLogLabel,
+  resolveDayLogDefaults
+} from "@/features/session-log/day-log-defaults";
 import { activePlanFromHydration, DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
 import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
 import {
   defaultState,
   exerciseLibrary,
-  logNumberFields,
   logNumberLimits,
   plan,
   sessionExerciseMap
@@ -160,20 +167,6 @@ const DB_NAME = "climb4w.videos";
 const DB_VERSION = 1;
 const VIDEO_STORE = "videos";
 const cloudVideoClient = createCloudClient(readAuthConfig(import.meta.env));
-
-const defaultLogValues = {
-  rpe: "8",
-  pump: "7",
-  pain: "0",
-  attempts: "12",
-  moves: "40",
-  bestLink: "0",
-  footCuts: "0",
-  pullWeight: "0",
-  sleep: "7",
-  energy: "7",
-  notes: ""
-};
 
 const videoMetricLabels = {
   footCuts: "Cortes de pie",
@@ -1290,7 +1283,13 @@ export default function App({
   const [liveHydration, setLiveHydration] = useState(null);
   const [planLoadState, setPlanLoadState] = useState("idle");
   const [guidedSessionOpen, setGuidedSessionOpen] = useState(false);
-  const [logForm, setLogForm] = useState(defaultLogValues);
+  const [logForm, setLogForm] = useState(() => dayLogFormValues(resolveDayLogDefaults({
+    session: plan[0],
+    sessions: plan,
+    logs: []
+  })));
+  const [logDirty, setLogDirty] = useState(false);
+  const logSessionRef = useRef(selectedSessionId);
   const [logError, setLogError] = useState("");
   const [logErrorTitle, setLogErrorTitle] = useState("Revisar valor");
   const [pendingSessionLogs, setPendingSessionLogs] = useState(() => listPendingSessionLogs(localStorage));
@@ -1449,6 +1448,20 @@ export default function App({
   }, [sessions, selectedSessionId]);
 
   const selectedSession = sessionById(sessions, selectedSessionId);
+  const dayLogDefaults = useMemo(() => (
+    selectedSession
+      ? resolveDayLogDefaults({ session: selectedSession, sessions, logs: state.logs })
+      : null
+  ), [selectedSession, sessions, state.logs]);
+
+  useEffect(() => {
+    if (!selectedSession || !dayLogDefaults) return;
+    const sessionChanged = logSessionRef.current !== selectedSession.id;
+    if (logDirty && !sessionChanged) return;
+    logSessionRef.current = selectedSession.id;
+    if (logDirty) setLogDirty(false);
+    setLogForm(dayLogFormValues(dayLogDefaults));
+  }, [selectedSession, dayLogDefaults, logDirty]);
   const selectedExercises = exercisesBySessionId?.[selectedSession?.id] || (selectedSession && !cloudVerified ? getSessionExercises(selectedSession) : []);
   const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
   const guidedSnapshot = activeUser.guidedSessions;
@@ -1876,16 +1889,15 @@ export default function App({
 
   function loadLogForSession(sessionId) {
     setSavedRecommendation(null);
-    const latest = (logsBySession.get(sessionId) || []).at(-1);
-    if (!latest) {
-      setLogForm(defaultLogValues);
-      return;
-    }
-    setLogForm({
-      ...defaultLogValues,
-      ...Object.fromEntries(logNumberFields.map((field) => [field, String(latest[field] ?? defaultLogValues[field])])),
-      notes: latest.notes || ""
-    });
+    setLogDirty(false);
+    logSessionRef.current = sessionId;
+    const session = sessionById(sessions, sessionId);
+    if (!session) return;
+    setLogForm(dayLogFormValues(resolveDayLogDefaults({
+      session,
+      sessions,
+      logs: state.logs
+    })));
   }
 
   function handleLogSessionChange(sessionId) {
@@ -1894,22 +1906,19 @@ export default function App({
   }
 
   function handleLogChange(field, value) {
+    setLogDirty(true);
     setLogForm((current) => ({ ...current, [field]: value }));
   }
 
   async function submitLog(event) {
     event.preventDefault();
-    const values = {};
-    for (const field of logNumberFields) {
-      const limit = logNumberLimits[field];
-      const numeric = Number(logForm[field]);
-      if (!Number.isFinite(numeric) || numeric < limit.min || numeric > limit.max) {
-        setLogErrorTitle("Revisar valor");
-        setLogError(`${limit.label}: usa un valor entre ${limit.min} y ${limit.max}.`);
-        return;
-      }
-      values[field] = numeric;
+    const parsed = metricsFromLogForm(logForm);
+    if (!parsed.ok) {
+      setLogErrorTitle("Revisar valor");
+      setLogError(parsed.message);
+      return;
     }
+    const values = parsed.metrics;
     if (logSaveLock.current) return;
     logSaveLock.current = true;
     setLogError("");
@@ -1951,7 +1960,7 @@ export default function App({
       if (outcome.status === "pending") {
         setSessionLogSyncMessage(outcome.message);
         setSavedRecommendation(null);
-        setLogForm(defaultLogValues);
+        setLogDirty(false);
         return;
       }
       setSessionLogSyncMessage("");
@@ -1961,7 +1970,7 @@ export default function App({
         session: selectedSession,
         assessment: buildSessionRecommendation(outcome.log, selectedSession)
       });
-      setLogForm(defaultLogValues);
+      setLogDirty(false);
     } finally {
       logSaveLock.current = false;
     }
@@ -1988,7 +1997,15 @@ export default function App({
   }
 
   function clearLogForm() {
-    setLogForm(defaultLogValues);
+    setLogDirty(false);
+    logSessionRef.current = selectedSession?.id ?? selectedSessionId;
+    if (selectedSession) {
+      setLogForm(dayLogFormValues(resolveDayLogDefaults({
+        session: selectedSession,
+        sessions,
+        logs: state.logs
+      })));
+    }
     setLogError("");
     setSavedRecommendation(null);
   }
@@ -2160,7 +2177,12 @@ export default function App({
     userDataRef.current = next;
     setUserData(next);
     setQuestionnaireOpen(true);
-    setLogForm(defaultLogValues);
+    setLogDirty(false);
+    setLogForm(dayLogFormValues(resolveDayLogDefaults({
+      session: plan[0],
+      sessions: plan,
+      logs: []
+    })));
     setSavedRecommendation(null);
     setVideoFile(null);
     setVideoUrl("");
@@ -2785,7 +2807,7 @@ export default function App({
                     help="Carga lo que paso en la sesion seleccionada. Estos datos alimentan el dashboard, el riesgo de fatiga y el historial."
                   />
                 </CardTitle>
-                <CardDescription>Guarda carga, dolor, link y notas tecnicas.</CardDescription>
+                <CardDescription>RPE, dolor e intentos vienen listos. El resto es opcional.</CardDescription>
               </CardHeader>
               <CardContent>
                 {savedRecommendation ? (
@@ -2843,11 +2865,14 @@ export default function App({
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
-                    {logNumberFields.map((field) => {
+                  {dayLogDefaults ? (
+                    <p className="text-sm text-muted-foreground">{dayLogDefaults.sourceLabel}</p>
+                  ) : null}
+                  <div className="grid grid-cols-3 gap-3">
+                    {quickLogFields.map((field) => {
                       const inputId = `log-${field}`;
                       return (
-                        <Field key={field} label={logNumberLimits[field].label} htmlFor={inputId} help={logFieldHelp[field]}>
+                        <Field key={field} label={quickLogLabel(field)} htmlFor={inputId} help={logFieldHelp[field]}>
                           <Input
                             id={inputId}
                             name={field}
@@ -2870,16 +2895,42 @@ export default function App({
                       <AlertDescription>{logError}</AlertDescription>
                     </Alert>
                   ) : null}
-                  <Field label="Notas" htmlFor="log-notes" help={logFieldHelp.notes}>
-                    <Textarea
-                      id="log-notes"
-                      name="notes"
-                      rows={4}
-                      value={logForm.notes}
-                      onChange={(event) => handleLogChange("notes", event.target.value)}
-                      placeholder="Piel, beta, caidas, dolor al dia siguiente, sensaciones"
-                    />
-                  </Field>
+                  <details className="rounded-lg border border-border/70 bg-background/45">
+                    <summary className="cursor-pointer px-3 py-3 text-sm font-medium">Más datos (opcional)</summary>
+                    <div className="space-y-4 px-3 pb-3">
+                      <p className="text-sm text-muted-foreground">Podés guardar sin completarlos.</p>
+                      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                        {advancedLogFields.map((field) => {
+                          const inputId = `log-${field}`;
+                          return (
+                            <Field key={field} label={logNumberLimits[field].label} htmlFor={inputId} help={logFieldHelp[field]}>
+                              <Input
+                                id={inputId}
+                                name={field}
+                                type="number"
+                                inputMode={integerInputLogFields.has(field) ? "numeric" : "decimal"}
+                                min={logNumberLimits[field].min}
+                                max={logNumberLimits[field].max}
+                                step={wholeStepLogFields.has(field) ? "1" : "0.5"}
+                                value={logForm[field]}
+                                onChange={(event) => handleLogChange(field, event.target.value)}
+                              />
+                            </Field>
+                          );
+                        })}
+                      </div>
+                      <Field label="Notas" htmlFor="log-notes" help={logFieldHelp.notes}>
+                        <Textarea
+                          id="log-notes"
+                          name="notes"
+                          rows={4}
+                          value={logForm.notes}
+                          onChange={(event) => handleLogChange("notes", event.target.value)}
+                          placeholder="Piel, beta, caidas, dolor al dia siguiente, sensaciones"
+                        />
+                      </Field>
+                    </div>
+                  </details>
                   <div className="flex flex-wrap gap-2">
                     <Button type="submit">
                       <Save className="size-4" />
