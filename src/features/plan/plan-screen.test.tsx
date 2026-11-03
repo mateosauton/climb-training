@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -168,5 +168,77 @@ describe("plan screen", () => {
     rerender(<ActivePlanNotice status="error" onRetry={vi.fn()} />);
     expect(screen.getByRole("alert")).toHaveTextContent("No pudimos leer tu plan activo.");
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+  });
+
+  it("shows the same empty plan on the profile badge, plan view, and sidebar", async () => {
+    const user = userEvent.setup();
+    render(<App cloudVerified cloudHydration={{
+      facts: [
+        { id: "fact-q", fact_key: "questionnaireCompleted", value: true, source: { type: "import", field: "questionnaireCompleted", version: 1 }, created_at: "2026-11-02T00:00:00.000Z" },
+        { id: "fact-current", fact_key: "currentGrade", value: "V6", source: { type: "import", field: "currentGrade", version: 1 }, created_at: "2026-11-02T00:00:00.000Z" },
+        { id: "fact-target", fact_key: "targetGrade", value: "7a", source: { type: "import", field: "targetGrade", version: 1 }, created_at: "2026-11-02T00:00:00.000Z" }
+      ],
+      sessionLogs: [],
+      guided: { schemaVersion: 1 as const, activeRun: null, history: [] },
+      activePlan: null,
+      profile: { avatarPath: null }
+    }} />);
+
+    expect(screen.getAllByText("Sin plan activo").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Plan activo")).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("tab", { name: "Plan" })[0]);
+    expect(screen.getByText("Todavía no tenés un plan activo.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Abrir perfil de/ }));
+    const profile = screen.getByRole("region", { name: "Mateo" });
+    expect(within(profile).getByText("Sin plan activo")).toBeInTheDocument();
+    expect(within(profile).queryByText("Plan activo")).not.toBeInTheDocument();
+    expect(within(profile).queryByText("Plan de demostración")).not.toBeInTheDocument();
+    expect(within(profile).queryByText("Progreso del plan")).not.toBeInTheDocument();
+    expect(within(profile).queryByText("0%")).not.toBeInTheDocument();
+    expect(within(profile).queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(within(profile).getByText("Completá grados comparables")).toBeInTheDocument();
+  });
+
+  it("shows Plan activo on the profile when the cloud plan is ready", async () => {
+    const user = userEvent.setup();
+    render(<App cloudVerified cloudHydration={{
+      facts: [{ id: "fact-q", fact_key: "questionnaireCompleted", value: true, source: { type: "import", field: "questionnaireCompleted", version: 1 }, created_at: "2026-11-02T00:00:00.000Z" }],
+      sessionLogs: [],
+      guided: { schemaVersion: 1 as const, activeRun: null, history: [] },
+      activePlan: {
+        id: "plan-ready",
+        published_at: "2026-11-02T00:00:00.000Z",
+        rationale: "Plan listo",
+        version_number: 1,
+        sessions: [{
+          id: "plan-ready-session",
+          position: 1,
+          scheduled_offset_days: 0,
+          phase: "Fuerza y potencia",
+          objective: "Construir fuerza.",
+          intensity: "moderate",
+          expected_duration_minutes: 45,
+          recovery_guidance: "Descansá.",
+          blocks: [{
+            id: "plan-ready-block",
+            position: 1,
+            phase: "work",
+            title: "Fuerza de dedos",
+            instructions: "Hangboard controlado.",
+            duration_minutes: 20,
+            exercises: [{ id: "plan-ready-ex", position: 1, exercise_id: "ex", exercise_content_version: 1, sets: 5, reps: 3, duration_seconds: null }]
+          }]
+        }]
+      },
+      profile: { avatarPath: null }
+    }} />);
+
+    await user.click(screen.getByRole("button", { name: /Abrir perfil de/ }));
+    const profile = screen.getByRole("region", { name: "Mateo" });
+    expect(within(profile).getByText("Plan activo")).toBeInTheDocument();
+    expect(within(profile).queryByText("Sin plan activo")).not.toBeInTheDocument();
+    expect(within(profile).queryByText("Plan de demostración")).not.toBeInTheDocument();
   });
 });

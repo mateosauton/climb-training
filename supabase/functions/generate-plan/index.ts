@@ -16,10 +16,16 @@ export interface PlanGenerator {
 
 type RecordValue = Record<string, unknown>;
 type Job = { id: string; status: string };
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers":
+    "authorization, x-client-info, apikey, content-type",
+  "access-control-allow-methods": "POST, OPTIONS",
+};
 const json = (status: number, body: RecordValue) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...corsHeaders },
   });
 const record = (value: unknown): value is RecordValue =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -138,6 +144,9 @@ async function updateJob(
 }
 
 Deno.serve(async (request) => {
+  if (request.method === "OPTIONS") {
+    return new Response("ok", { status: 200, headers: corsHeaders });
+  }
   if (request.method !== "POST") {
     return json(405, { error: "method_not_allowed" });
   }
