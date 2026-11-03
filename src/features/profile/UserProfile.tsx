@@ -89,6 +89,7 @@ type UserProfileProps = {
   theme?: "light" | "dark" | string;
   onCopyJson: () => void;
   onDownloadJson: () => void;
+  onDownloadCsv: () => void;
   onReset: () => void;
   onSignOut: () => void;
   onOpenQuestionnaire: () => void;
@@ -211,6 +212,7 @@ export function UserProfile({
   theme = "light",
   onCopyJson,
   onDownloadJson,
+  onDownloadCsv,
   onReset,
   onSignOut,
   onOpenQuestionnaire,
@@ -410,6 +412,7 @@ export function UserProfile({
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" onClick={onCopyJson}><Database className="size-4" />Copiar JSON</Button>
                   <Button type="button" variant="outline" onClick={onDownloadJson}><Download className="size-4" />Descargar</Button>
+                  <Button type="button" variant="outline" onClick={onDownloadCsv}><Download className="size-4" />Descargar CSV</Button>
                 </div>
                 <Textarea readOnly wrap="off" spellCheck={false} value={exportJson} className="max-h-52 font-mono text-xs" aria-label="JSON exportado del tracker" />
                 <Card className="border-destructive/30 bg-destructive/5">

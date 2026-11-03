@@ -125,13 +125,13 @@ import { GuidedSessionFlow } from "@/features/guided-session/GuidedSessionFlow";
 import { GuidedResumeBanner } from "@/features/guided-session/GuidedResumeBanner";
 import { guidedSessionDefinitions } from "@/features/guided-session/guided-session-data";
 import { appendChangedFacts, projectTrackerState } from "@/features/user-data/user-facts";
-import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
+import { buildSessionLogsCsv, buildUserDataExport, sessionLogsCsvFilename, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
 import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
 import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
-import { cloudLogSessionId, openRunFromHydration, resolveSessionLogTarget } from "@/features/cloud/session-log-binding";
+import { openRunFromHydration, resolveSessionLogTarget, sessionLogFromCloudRow } from "@/features/cloud/session-log-binding";
 import { sessionLogFailureMessage } from "@/features/cloud/session-log-errors";
 import { listPendingSessionLogs } from "@/features/cloud/session-log-outbox";
 import { mergePendingSessionLogs, retryPendingSessionLogs, saveSessionLog } from "@/features/cloud/session-log-save";
@@ -1261,17 +1261,7 @@ export default function App({
         },
         supersedes: fact.supersedes_id || fact.supersedes || null
       }));
-      const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
-        ...log.metrics,
-        id: typeof log.idempotency_key === "string" ? log.idempotency_key : log.id,
-        sessionId: cloudLogSessionId(log),
-        createdAt: log.created_at || log.createdAt,
-        notes: log.body || log.metrics?.notes || "",
-        rpe: log.rpe ?? log.metrics?.rpe ?? 0,
-        pump: log.pump ?? log.metrics?.pump ?? 0,
-        pain: log.pain ?? log.metrics?.pain ?? 0,
-        energy: log.energy ?? log.metrics?.energy ?? 0
-      }));
+      const sessionLogs = (cloudHydration.sessionLogs || []).map(sessionLogFromCloudRow);
       envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: {
         ...active, facts, sessionLogs,
         guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
@@ -1619,9 +1609,12 @@ export default function App({
 
   const exportSnapshot = useMemo(() => {
     const exportedAt = new Date().toISOString();
+    const logs = userData.users[userData.activeUserId]?.sessionLogs ?? [];
     return {
       json: buildUserDataExport(userData, exportedAt),
-      filename: userDataExportFilename(userData, exportedAt)
+      filename: userDataExportFilename(userData, exportedAt),
+      csv: buildSessionLogsCsv(logs),
+      csvFilename: sessionLogsCsvFilename(userData, exportedAt)
     };
   }, [userData]);
   const exportJson = exportSnapshot.json;
@@ -2246,14 +2239,22 @@ export default function App({
     updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.filter((video) => video.id !== id) }));
   }
 
-  function downloadJson() {
-    const blob = new Blob([exportJson], { type: "application/json" });
+  function downloadTextFile(contents, type, filename) {
+    const blob = new Blob([contents], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = exportSnapshot.filename;
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function downloadJson() {
+    downloadTextFile(exportJson, "application/json", exportSnapshot.filename);
+  }
+
+  function downloadCsv() {
+    downloadTextFile(exportSnapshot.csv, "text/csv;charset=utf-8", exportSnapshot.csvFilename);
   }
 
   async function resetData() {
@@ -3312,6 +3313,7 @@ export default function App({
             theme={theme}
             onCopyJson={() => void navigator.clipboard?.writeText(exportJson)}
             onDownloadJson={downloadJson}
+            onDownloadCsv={downloadCsv}
             onReset={() => void resetData()}
             onSignOut={onSignOut}
             onOpenQuestionnaire={() => setQuestionnaireOpen(true)}
@@ -3500,6 +3502,10 @@ export default function App({
                     <Button type="button" variant="outline" onClick={downloadJson}>
                       <Download className="size-4" />
                       Descargar
+                    </Button>
+                    <Button type="button" variant="outline" onClick={downloadCsv}>
+                      <Download className="size-4" />
+                      Descargar CSV
                     </Button>
                     <Button
                       type="button"
