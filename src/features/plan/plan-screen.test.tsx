@@ -190,8 +190,14 @@ describe("plan screen", () => {
     await user.click(screen.getAllByRole("tab", { name: "Plan" })[0]);
     expect(screen.getByText("Todavía no tenés un plan activo.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Abrir perfil de/ }));
-    const profile = screen.getByRole("region", { name: "Mateo" });
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Escalador" }));
+    const profile = screen.getByRole("region", { name: "Escalador" });
+    expect(within(profile).getByRole("heading", { name: "Escalador" })).toBeInTheDocument();
+    expect(within(profile).getByLabelText("Nombre")).toHaveValue("");
+    expect(within(profile).queryByRole("heading", { name: "Mateo" })).not.toBeInTheDocument();
+    await user.click(within(profile).getByRole("tab", { name: "Entrenamiento" }));
+    expect(within(profile).getByLabelText("Historial de lesiones")).toHaveValue("");
+    expect(within(profile).getByLabelText("Recuperación")).toHaveValue("");
     expect(within(profile).getByText("Sin plan activo")).toBeInTheDocument();
     expect(within(profile).queryByText("Plan activo")).not.toBeInTheDocument();
     expect(within(profile).queryByText("Plan de demostración")).not.toBeInTheDocument();
@@ -235,8 +241,11 @@ describe("plan screen", () => {
       profile: { avatarPath: null }
     }} />);
 
-    await user.click(screen.getByRole("button", { name: /Abrir perfil de/ }));
-    const profile = screen.getByRole("region", { name: "Mateo" });
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Escalador" }));
+    const profile = screen.getByRole("region", { name: "Escalador" });
+    expect(within(profile).getByRole("heading", { name: "Escalador" })).toBeInTheDocument();
+    expect(within(profile).getByLabelText("Nombre")).toHaveValue("");
+    expect(within(profile).queryByRole("heading", { name: "Mateo" })).not.toBeInTheDocument();
     expect(within(profile).getByText("Plan activo")).toBeInTheDocument();
     expect(within(profile).queryByText("Sin plan activo")).not.toBeInTheDocument();
     expect(within(profile).queryByText("Plan de demostración")).not.toBeInTheDocument();
