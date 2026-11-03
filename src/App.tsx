@@ -1482,6 +1482,8 @@ export default function App({
   }, [completedSessionIds, state.logs]);
 
   const completionPercent = sessions.length ? Math.round((metrics.completed / sessions.length) * 100) : 0;
+  const profilePlanStatus = !cloudVerified ? "demo" : (planNotice ?? "ready");
+  const profilePlanProgress = sessions.length ? completionPercent : null;
   const remainingSessions = Math.max(0, sessions.length - metrics.completed);
   const latestLoggedSessions = useMemo(() => {
     const seen = new Set();
@@ -3145,7 +3147,8 @@ export default function App({
             profile={state.profile}
             goals={state.goals}
             logs={state.logs}
-            planProgress={completionPercent}
+            planStatus={profilePlanStatus}
+            planProgress={profilePlanProgress}
             avatarFile={avatarFile}
             avatarUrl={avatarUrl}
             avatarError={avatarError}

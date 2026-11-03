@@ -39,6 +39,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import type { AvatarFile } from "@/features/cloud/cloud-avatar";
+import { DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
 import type { SessionLog, TrackerState } from "@/lib/training";
 import { ProfilePhotoPicker } from "./ProfilePhotoPicker";
 import {
@@ -57,10 +58,21 @@ type ProfileDraft = Pick<TrackerState["goals"], "currentGrade" | "targetGrade" |
     | "hipAnkleMobility" | "currentPain" | "injuryHistory" | "recoveryNotes" | "coachNotes"
   >;
 
+type ProfilePlanStatus = "ready" | "empty" | "loading" | "error" | "demo";
+
+const planBadgeLabels = {
+  ready: "Plan activo",
+  empty: "Sin plan activo",
+  loading: "Cargando…",
+  error: null,
+  demo: DEMO_PLAN_LABEL
+} as const satisfies Record<ProfilePlanStatus, string | null>;
+
 type UserProfileProps = {
   profile: TrackerState["profile"];
   goals: TrackerState["goals"];
   logs: SessionLog[];
+  planStatus?: ProfilePlanStatus;
   planProgress?: number | null;
   now?: Date;
   avatarFile: AvatarFile | null;
@@ -182,6 +194,7 @@ export function UserProfile({
   profile,
   goals,
   logs,
+  planStatus,
   planProgress = null,
   now = new Date(),
   avatarFile,
@@ -250,6 +263,7 @@ export function UserProfile({
 
   const progressValue = metrics.progress ?? planProgress;
   const progressLabel = progressValue === null ? "Sin datos" : `${progressValue}%`;
+  const planBadge = planStatus ? planBadgeLabels[planStatus] : null;
 
   return (
     <section id="profile" className="space-y-4" aria-labelledby="user-profile-title">
@@ -271,7 +285,7 @@ export function UserProfile({
             <div className="flex flex-wrap gap-2 sm:justify-end">
               <Badge variant="secondary">{goals.currentGrade || "—"} actual</Badge>
               <Badge>{goals.targetGrade || "—"} objetivo</Badge>
-              <Badge variant="outline">Plan activo</Badge>
+              {planBadge ? <Badge variant="outline">{planBadge}</Badge> : null}
             </div>
             <Button type="button" variant="outline" onClick={() => {
               editorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
@@ -446,4 +460,4 @@ export function UserProfile({
   );
 }
 
-export type { ProfileDraft, UserProfileProps };
+export type { ProfileDraft, ProfilePlanStatus, UserProfileProps };
