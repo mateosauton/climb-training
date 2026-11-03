@@ -422,8 +422,8 @@ describe("cloud-primary app integration", () => {
       profile: { avatarPath: null }
     }} />);
 
-    await user.click(screen.getAllByRole("tab", { name: "Log" })[0]);
-    await user.click(screen.getByRole("button", { name: "Guardar log" }));
+    await user.click(screen.getAllByRole("tab", { name: "Sesiones" })[0]);
+    await user.click(screen.getByRole("button", { name: "Guardar sesión" }));
 
     await waitFor(() => expect(appendSessionLog).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: expect.any(String),
@@ -431,7 +431,7 @@ describe("cloud-primary app integration", () => {
       planSessionId: "11111111-1111-4111-8111-111111111111"
     })));
     expect(appendSessionLog.mock.calls[0]?.[0]?.sessionId).toBeUndefined();
-    expect(await screen.findByText("Log guardado")).toBeInTheDocument();
+    expect(await screen.findByText("Sesión guardada")).toBeInTheDocument();
     expect(screen.getByText("El log se guardó en la nube, pero no pudimos verificar la copia en este dispositivo.")).toBeInTheDocument();
   });
 

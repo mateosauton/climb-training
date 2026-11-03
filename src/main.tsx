@@ -12,6 +12,8 @@ import "./index.css";
 
 const e2eUserId = import.meta.env.DEV ? import.meta.env.VITE_E2E_AUTH_USER_ID?.trim() : undefined;
 const e2eSignedOut = Boolean(e2eUserId) && new URLSearchParams(window.location.search).get("e2e-auth") === "signed-out";
+const e2eSearch = new URLSearchParams(window.location.search);
+const e2eP0Preview = Boolean(e2eUserId) && (e2eSearch.get("p0") === "1" || e2eSearch.get("e2e-cloud") === "1");
 const authConfig = e2eUserId
   ? { url: "https://e2e.invalid", publishableKey: "e2e_publishable" }
   : readAuthConfig(import.meta.env);
@@ -19,7 +21,7 @@ const authClient = e2eUserId
   ? createE2EAuthClient(e2eUserId, import.meta.env.VITE_E2E_AUTH_EMAIL?.trim() || null, !e2eSignedOut)
   : authConfig ? createSupabaseAuthClient(authConfig) : null;
 const cloudClient = e2eUserId ? null : createCloudClient(authConfig);
-const cloudRepository = e2eSignedOut
+const cloudRepository = e2eSignedOut || e2eP0Preview
   ? createE2ECloudRepository()
   : cloudClient ? createCloudRepository(cloudClient as unknown as CloudQueryClient) : null;
 const cloudImport = cloudClient ? createCloudImport(cloudClient, localStorage) : null;
