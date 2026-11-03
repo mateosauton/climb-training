@@ -92,10 +92,10 @@ function compatibilityValue(value: UserFactValue, fallback: string | number | bo
   return String(value);
 }
 
-export function projectTrackerState(record: UserRecord): TrackerState {
+export function projectTrackerState(record: UserRecord, baseline: TrackerState = defaultState): TrackerState {
   const projected: TrackerState = {
-    goals: { ...defaultState.goals },
-    profile: { ...defaultState.profile },
+    goals: { ...baseline.goals },
+    profile: { ...baseline.profile },
     logs: record.sessionLogs,
     videos: record.videoAnalyses
   };

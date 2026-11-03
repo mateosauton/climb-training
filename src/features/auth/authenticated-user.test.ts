@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { emptyGuidedSessionState } from "../guided-session/guided-session-storage";
 import { defaultState } from "../../lib/training";
 import { migrateLegacyUserData } from "../user-data/user-data-migration";
+import { projectTrackerState } from "../user-data/user-facts";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "./authenticated-user";
 
 const firstAt = "2026-07-14T12:00:00.000Z";
@@ -71,5 +72,34 @@ describe("activateAuthenticatedUser", () => {
     expect(result.users[result.activeUserId].identity.auth).toEqual({ provider: "supabase", subject: "user-2", email: "second@example.com" });
     expect(result.users[result.activeUserId].sessionLogs).toEqual([]);
     expect(result.users[result.activeUserId].identity.id).toBe(second.activeUserId);
+  });
+
+  it("keeps the Mateo seed when a reset does not override the tracker", () => {
+    const first = activateAuthenticatedUser(localEnvelope(), { id: "user-1", email: "first@example.com" }, { now: firstAt, makeId: ids("claim") });
+    const result = resetAuthenticatedUser(first, { id: "user-1", email: "first@example.com" }, { now: nextAt, makeId: ids("reset") });
+    const name = result.users[result.activeUserId].facts.find((fact) => fact.key === "name");
+
+    expect(name?.value).toBe("Mateo");
+    expect(projectTrackerState(result.users[result.activeUserId]).profile.injuryHistory).toMatch(/dedos/i);
+  });
+
+  it("does not copy the Mateo name or freeform injury notes into a new authenticated record", () => {
+    const first = activateAuthenticatedUser(localEnvelope(), { id: "user-1", email: "first@example.com" }, { now: firstAt, makeId: ids("claim") });
+    const tracker = structuredClone(defaultState);
+    tracker.profile.name = "";
+    tracker.profile.injuryHistory = "";
+    tracker.profile.recoveryNotes = "";
+
+    const result = activateAuthenticatedUser(first, { id: "user-2", email: "second@example.com" }, { now: nextAt, makeId: ids("second"), tracker });
+    const facts = result.users[result.activeUserId].facts;
+
+    expect(facts.some((fact) => fact.key === "name")).toBe(false);
+    expect(facts.some((fact) => fact.key === "injuryHistory")).toBe(false);
+    expect(facts.some((fact) => fact.key === "recoveryNotes")).toBe(false);
+    expect(projectTrackerState(result.users[result.activeUserId], tracker).profile).toMatchObject({
+      name: "",
+      injuryHistory: "",
+      recoveryNotes: ""
+    });
   });
 });

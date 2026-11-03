@@ -1,4 +1,4 @@
-import { defaultState } from "../../lib/training";
+import { defaultState, type TrackerState } from "../../lib/training";
 import { emptyGuidedSessionState } from "../guided-session/guided-session-storage";
 import { migrateLegacyUserData } from "../user-data/user-data-migration";
 import type { UserDataEnvelope } from "../user-data/user-data-types";
@@ -7,11 +7,12 @@ import type { AuthUser } from "./auth-client";
 type ActivateOptions = {
   now: string;
   makeId: () => string;
+  tracker?: TrackerState;
 };
 
 function freshAuthenticatedRecord(user: AuthUser, options: ActivateOptions) {
   const fresh = migrateLegacyUserData({
-    tracker: structuredClone(defaultState),
+    tracker: structuredClone(options.tracker ?? defaultState),
     guided: emptyGuidedSessionState(),
     now: options.now,
     makeId: options.makeId
