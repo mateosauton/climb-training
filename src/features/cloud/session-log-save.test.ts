@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { anchorLogFields, buildAnchorHistory, parseAnchorDraft } from "../p0/anchor-tests";
 import { resolveSessionLogTarget } from "./session-log-binding";
 import {
   classifySessionLogError,
@@ -11,7 +12,7 @@ import {
 } from "./session-log-errors";
 import { listPendingSessionLogs, SESSION_LOG_OUTBOX_KEY } from "./session-log-outbox";
 import type { SessionLogInput } from "./cloud-types";
-import { retryPendingSessionLogs, saveSessionLog } from "./session-log-save";
+import { retryPendingSessionLogs, saveSessionLog, sessionLogCloudInput } from "./session-log-save";
 
 const planSessionId = "00000000-0000-4000-8000-000000000a21";
 const runId = "00000000-0000-4000-8000-000000000341";
@@ -59,6 +60,87 @@ function envelopeWriter(fail = false) {
 }
 
 describe("session log saves", () => {
+  it("writes an anchor on the legacy key without a subjective RPE", async () => {
+    const input = sessionLogCloudInput({
+      idempotencyKey,
+      createdAt: "2026-11-03T12:00:00.000Z",
+      sessionBinding: "legacy",
+      planSessionId: null,
+      runId: null,
+      legacySessionKey: "anchor:hang-20mm",
+      localSessionId: "anchor:hang-20mm",
+      notes: "Beastmaker 20 mm",
+      rpe: 0,
+      pump: 0,
+      pain: 0,
+      attempts: 0,
+      moves: 32,
+      bestLink: 0,
+      footCuts: 0,
+      pullWeight: 0,
+      sleep: 0,
+      energy: 0,
+      lastErrorCode: null,
+      lastCause: null
+    });
+    expect(input).toEqual({
+      idempotencyKey,
+      sessionBinding: "legacy",
+      sessionId: "anchor:hang-20mm",
+      metrics: { notes: "Beastmaker 20 mm", moves: 32 }
+    });
+    expect(input.metrics).not.toHaveProperty("rpe");
+
+    const draft = parseAnchorDraft({ protocol: "hang-20mm", result: "32", setup: "Beastmaker 20 mm" });
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    const fields = anchorLogFields(draft.draft);
+    let captured: SessionLogInput | null = null;
+    const storage = memoryStorage();
+    const outcome = await saveSessionLog({
+      storage,
+      idempotencyKey,
+      createdAt: "2026-10-06T12:00:00.000Z",
+      notes: fields.notes,
+      metrics: fields.metrics,
+      binding: resolveSessionLogTarget({ selectedSessionId: fields.sessionId, planSessions: [] }),
+      persistEnvelope: (log) => ({ ok: true, envelope: log }),
+      appendSessionLog: async (input) => { captured = input; }
+    });
+    expect(outcome.status).toBe("saved");
+    if (outcome.status !== "saved") return;
+    expect(buildAnchorHistory([outcome.log], "2026-11-03").schedules["hang-20mm"]).toMatchObject({
+      status: "due",
+      dueOn: "2026-11-03"
+    });
+    expect(buildAnchorHistory([outcome.log], "2026-11-03").points[0]).toMatchObject({ result: 32, setup: "Beastmaker 20 mm" });
+    expect(captured?.metrics.rpe).toBeUndefined();
+    expect(captured?.sessionId).toBe("anchor:hang-20mm");
+
+    expect(sessionLogCloudInput({
+      idempotencyKey,
+      createdAt: "2026-11-03T12:00:00.000Z",
+      sessionBinding: "legacy",
+      planSessionId: null,
+      runId: null,
+      legacySessionKey: "anchor:weighted-pullups",
+      localSessionId: "anchor:weighted-pullups",
+      notes: "Barra de casa",
+      rpe: 0,
+      pump: 0,
+      pain: 0,
+      attempts: 1,
+      moves: 0,
+      bestLink: 0,
+      footCuts: 0,
+      pullWeight: 12.5,
+      sleep: 0,
+      energy: 0,
+      lastErrorCode: null,
+      lastCause: null
+    }).metrics).toEqual({ notes: "Barra de casa", pullWeight: 12.5, attempts: 1 });
+  });
+
   afterEach(() => resetSessionLogObserver());
 
   it("resolves a real plan session and its open run, and marks every other shape explicitly", () => {

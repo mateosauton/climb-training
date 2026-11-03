@@ -63,6 +63,16 @@ describe("profile summary", () => {
     expect(calculateWeeklyStreak([], new Date("2026-07-17T15:00:00Z"))).toBe(0);
   });
 
+  it("does not count a 4-week anchor as a training session", () => {
+    const now = new Date("2026-07-17T15:00:00Z");
+    const anchor = log("2026-07-17T10:00:00Z", { sessionId: "anchor:hang-20mm", rpe: 0, moves: 40, attempts: 0, pullWeight: 0 });
+    const previousWeek = log("2026-07-08T10:00:00Z");
+    expect(calculateCurrentWeekSessions([anchor], now)).toBe(0);
+    expect(calculateWeeklyStreak([previousWeek, anchor], now)).toBe(0);
+    expect(calculateTrainingLoad([anchor], now)).toBe("Sin datos");
+    expect(calculateTrainingLoad([log("2026-07-17T10:00:00Z", { rpe: 3, moves: 10, attempts: 2 }), anchor], now)).toBe("Baja");
+  });
+
   it("classifies current-week training load", () => {
     const now = new Date("2026-07-17T15:00:00Z");
     expect(calculateTrainingLoad([], now)).toBe("Sin datos");

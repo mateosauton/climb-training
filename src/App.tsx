@@ -146,6 +146,7 @@ import { appTabForPath } from "@/features/auth/auth-routes";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import { activePlanFromHydration, DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
 import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
+import { anchorLogFields, trainingLogs } from "@/features/p0/anchor-tests";
 import { ProgressDashboard } from "@/features/p0/ProgressDashboard";
 import { SessionLogger } from "@/features/p0/SessionLogger";
 import {
@@ -1312,6 +1313,7 @@ export default function App({
     return initialPlan.status === "ready" ? loadPlanWeekEdits(localStorage, initialPlan.plan.planId) : emptyPlanWeekEdits();
   });
   const [quickLog, setQuickLog] = useState({ status: "idle", message: "", sessionId: "" });
+  const [anchorSave, setAnchorSave] = useState({ status: "idle", message: "" });
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
@@ -1463,7 +1465,8 @@ export default function App({
 
   const selectedSession = sessionById(sessions, selectedSessionId);
   const selectedExercises = exercisesBySessionId?.[selectedSession?.id] || (selectedSession && !cloudVerified ? getSessionExercises(selectedSession) : []);
-  const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
+  const trainingSessionLogs = useMemo(() => trainingLogs(state.logs), [state.logs]);
+  const completedSessionIds = useMemo(() => new Set(trainingSessionLogs.map((log) => log.sessionId)), [trainingSessionLogs]);
   const guidedSnapshot = activeUser.guidedSessions;
   const activeGuidedRun = guidedSnapshot.activeRun;
   const guidedCompletedSessionIds = new Set(
@@ -1488,11 +1491,11 @@ export default function App({
 
   const metrics = useMemo(() => {
     const completed = completedSessionIds.size;
-    const bestLink = Math.max(0, ...state.logs.map((log) => Number(log.bestLink || 0)));
-    const avgRpe = average(state.logs.map((log) => log.rpe));
-    const avgPain = average(state.logs.map((log) => log.pain));
-    return { completed, bestLink, avgRpe, avgPain, totalLogs: state.logs.length };
-  }, [completedSessionIds, state.logs]);
+    const bestLink = Math.max(0, ...trainingSessionLogs.map((log) => Number(log.bestLink || 0)));
+    const avgRpe = average(trainingSessionLogs.map((log) => log.rpe));
+    const avgPain = average(trainingSessionLogs.map((log) => log.pain));
+    return { completed, bestLink, avgRpe, avgPain, totalLogs: trainingSessionLogs.length };
+  }, [completedSessionIds, trainingSessionLogs]);
 
   const completionPercent = sessions.length ? Math.round((metrics.completed / sessions.length) * 100) : 0;
   const profilePlanStatus = !cloudVerified ? "demo" : (planNotice ?? "ready");
@@ -2092,6 +2095,56 @@ export default function App({
     }
   }
 
+  async function submitAnchor(draft) {
+    if (logSaveLock.current) return;
+    logSaveLock.current = true;
+    setAnchorSave({ status: "saving", message: "" });
+    const fields = anchorLogFields(draft);
+    try {
+      const outcome = await saveSessionLog({
+        storage: localStorage,
+        idempotencyKey: makeId(),
+        createdAt: new Date().toISOString(),
+        notes: fields.notes,
+        metrics: fields.metrics,
+        binding: resolveSessionLogTarget({
+          selectedSessionId: fields.sessionId,
+          planSessions: projection?.status === "ready" ? projection.plan.sessions : hydration?.activePlan?.sessions ?? [],
+          openRun: openRunFromHydration(hydration?.openSessionRun)
+        }),
+        persistEnvelope: (log) => {
+          const current = userDataRef.current;
+          const userId = current.activeUserId;
+          const existing = current.users[userId].sessionLogs;
+          const sessionLogs = existing.some((item) => item.id === log.id) ? existing : [...existing, log];
+          const next = { ...current, users: { ...current.users, [userId]: { ...current.users[userId], sessionLogs } } };
+          try {
+            const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+            return { ...recovery, envelope: next };
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : "write", envelope: next };
+          }
+        },
+        appendSessionLog: cloudRepository ? (input) => cloudRepository.appendSessionLog(input) : null
+      });
+      setPendingSessionLogs(listPendingSessionLogs(localStorage));
+      if (outcome.status === "blocked") {
+        setAnchorSave({ status: "error", message: outcome.message });
+        return;
+      }
+      userDataRef.current = outcome.envelope;
+      setUserData(outcome.envelope);
+      if (outcome.status === "pending") {
+        setAnchorSave({ status: "error", message: outcome.message });
+        return;
+      }
+      if (outcome.warning) setUserDataWarning(outcome.warning);
+      setAnchorSave({ status: "saved", message: "Ancla guardada." });
+    } finally {
+      logSaveLock.current = false;
+    }
+  }
+
   function clearLogForm() {
     setLogForm(defaultLogValues);
     setLogError("");
@@ -2393,6 +2446,9 @@ export default function App({
                 today={new Date().toISOString().slice(0, 10)}
                 athleteInitials={(state.profile.name || "E").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E"}
                 onOpenProfile={() => setActiveTab("profile")}
+                onSaveAnchor={(draft) => { void submitAnchor(draft); }}
+                anchorStatus={anchorSave.status}
+                anchorMessage={anchorSave.message}
               />
           ) : (
           <>
