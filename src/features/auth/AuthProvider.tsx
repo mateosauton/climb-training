@@ -35,6 +35,7 @@ type AuthProviderProps = {
 function failureMessage(failure: AuthFailure, fallback: string): string {
   if (failure === "invalid_credentials") return AUTH_COPY.invalidCredentials;
   if (failure === "email_not_confirmed") return AUTH_COPY.confirmEmail;
+  if (failure === "email_exists") return AUTH_COPY.emailAlreadyRegistered;
   if (failure === "offline") return AUTH_COPY.offline;
   if (failure === "weak_password") return "La contraseña no cumple los requisitos de seguridad.";
   if (failure === "email_rate_limit") return "El servicio de correo alcanzó su límite temporal. Intenta de nuevo más tarde.";

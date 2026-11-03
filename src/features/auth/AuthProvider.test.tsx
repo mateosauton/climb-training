@@ -173,6 +173,19 @@ describe("AuthProvider", () => {
     expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("invalid_credentials");
   });
 
+  it("shows an existing-account error instead of the check-your-email notice", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.signUp).mockResolvedValue({ session: null, error: "email_exists" });
+    renderProvider(auth);
+    await waitFor(() => expect(screen.getByLabelText("auth-state")).toHaveTextContent('"loading":false'));
+
+    await userEvent.click(screen.getByRole("button", { name: "sign up" }));
+
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent("Este correo ya tiene una cuenta. Iniciá sesión o recuperá tu contraseña.");
+    expect(screen.getByLabelText("auth-state")).not.toHaveTextContent("Revisa tu correo");
+    expect(screen.getByLabelText("auth-state")).toHaveTextContent('"pendingVerificationEmail":null');
+  });
+
   it("explains when the confirmation email service is temporarily full", async () => {
     const auth = fakeClient();
     vi.mocked(auth.client.signUp).mockResolvedValue({ session: null, error: "email_rate_limit" });

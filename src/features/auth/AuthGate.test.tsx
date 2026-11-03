@@ -134,6 +134,29 @@ describe("AuthGate", () => {
     expect(await screen.findByText("tracker for verified-user")).toBeInTheDocument();
   });
 
+  it("tells an existing account to sign in or reset instead of waiting for mail", async () => {
+    window.history.replaceState(null, "", "/escalada/signup?next=%2Fescalada%2Fplan");
+    const auth = fakeClient();
+    vi.mocked(auth.client.signUp).mockResolvedValue({ session: null, error: "email_exists" });
+    renderGate(auth.client);
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Correo"), "sautonmateo@gmail.com");
+    await user.type(screen.getByLabelText("Contraseña"), "password1");
+    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Este correo ya tiene una cuenta. Iniciá sesión o recuperá tu contraseña.");
+    expect(screen.queryByText("Revisa tu correo para obtener el código de seis dígitos.")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Iniciá sesión" })).toHaveAttribute("href", "/escalada/login?next=%2Fescalada%2Fplan");
+    expect(screen.getByRole("link", { name: "recuperá tu contraseña" })).toHaveAttribute("href", "/escalada/reset?next=%2Fescalada%2Fplan");
+
+    await user.click(screen.getByRole("link", { name: "Iniciá sesión" }));
+    expect(await screen.findByRole("heading", { name: "Maillon" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps a short signup password from being submitted", async () => {
     const auth = fakeClient();
     renderGate(auth.client);

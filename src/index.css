@@ -417,6 +417,7 @@ body:has(.auth-gate) {
 
 .auth-error p { margin: 0; }
 
+.auth-error a,
 .auth-error button {
   padding: 0;
   border: 0;
@@ -425,6 +426,7 @@ body:has(.auth-gate) {
   font: inherit;
   font-weight: 700;
   text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 

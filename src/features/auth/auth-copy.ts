@@ -1,3 +1,7 @@
+const emailAlreadyRegisteredLead = "Este correo ya tiene una cuenta.";
+const emailAlreadyRegisteredLogin = "Iniciá sesión";
+const emailAlreadyRegisteredReset = "recuperá tu contraseña";
+
 export const AUTH_COPY = {
   wordmark: "Maillon",
   loginSubtitle: "Inicia sesión para ver tu plan y guardar tus sesiones en tu cuenta.",
@@ -16,6 +20,10 @@ export const AUTH_COPY = {
   footer: "Tus sesiones se guardan en este dispositivo y se sincronizan con tu cuenta.",
   deepLink: "Inicia sesión para ver tu plan.",
   invalidCredentials: "Correo o contraseña incorrectos.",
+  emailAlreadyRegisteredLead,
+  emailAlreadyRegisteredLogin,
+  emailAlreadyRegisteredReset,
+  emailAlreadyRegistered: `${emailAlreadyRegisteredLead} ${emailAlreadyRegisteredLogin} o ${emailAlreadyRegisteredReset}.`,
   confirmEmail: "Confirma tu correo para continuar.",
   resendLink: "Reenviar enlace",
   passwordMismatch: "Las contraseñas no coinciden.",

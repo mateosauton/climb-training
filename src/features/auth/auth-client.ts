@@ -1,6 +1,7 @@
 import { createClient, type AuthChangeEvent, type AuthError, type Session, type SupabaseClient } from "@supabase/supabase-js";
 
 import type { AuthConfig } from "./auth-config";
+import { repeatedSignupFailure } from "./signup-errors";
 
 export type { AuthConfig } from "./auth-config";
 
@@ -14,7 +15,7 @@ export type AuthSession = {
 } | null;
 
 export type AuthEvent = AuthChangeEvent;
-export type AuthFailure = "invalid_credentials" | "email_not_confirmed" | "weak_password" | "email_rate_limit" | "rate_limit" | "expired_link" | "offline" | "unknown";
+export type AuthFailure = "invalid_credentials" | "email_not_confirmed" | "email_exists" | "weak_password" | "email_rate_limit" | "rate_limit" | "expired_link" | "offline" | "unknown";
 export type AuthActionResult = { error: AuthFailure | null };
 export type AuthSessionResult = AuthActionResult & { session: AuthSession };
 
@@ -56,8 +57,33 @@ function toFailure(error: AuthError | null): AuthFailure | null {
   return "unknown";
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+function isSignupPost(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const method = (
+    init?.method
+    ?? (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+  ).toUpperCase();
+  return method === "POST" && requestUrl(input).includes("/auth/v1/signup");
+}
+
 export function createSupabaseAuthClient(config: AuthConfig): AuthClient {
-  const client: SupabaseClient = createClient(config.url, config.publishableKey);
+  let signupBody: unknown;
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+  const fetchWithSignupBody: typeof fetch = async (input, init) => {
+    const response = await nativeFetch(input, init);
+    if (isSignupPost(input, init) && response.ok) {
+      signupBody = await response.clone().json().catch(() => undefined);
+    }
+    return response;
+  };
+  const client: SupabaseClient = createClient(config.url, config.publishableKey, {
+    global: { fetch: fetchWithSignupBody }
+  });
   return {
     async getSession() {
       const { data, error } = await client.auth.getSession();
@@ -68,12 +94,24 @@ export function createSupabaseAuthClient(config: AuthConfig): AuthClient {
       return () => data.subscription.unsubscribe();
     },
     async signUp(email, password, redirectTo) {
-      const { data, error } = await client.auth.signUp({
-        email,
-        password,
-        options: { emailRedirectTo: redirectTo }
-      });
-      return { session: toSession(data.session), error: toFailure(error) };
+      signupBody = undefined;
+      try {
+        const { data, error } = await client.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: redirectTo }
+        });
+        const repeated = repeatedSignupFailure({
+          error,
+          user: data.user,
+          session: data.session,
+          body: signupBody
+        });
+        if (repeated) return { session: null, error: repeated };
+        return { session: toSession(data.session), error: toFailure(error) };
+      } finally {
+        signupBody = undefined;
+      }
     },
     async verifyEmailCode(email, code) {
       const { data, error } = await client.auth.verifyOtp({ email, token: code, type: "email" });
