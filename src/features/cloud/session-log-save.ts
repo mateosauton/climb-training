@@ -1,4 +1,5 @@
 import type { SessionLog } from "../../lib/training";
+import { anchorCloudInput } from "../p0/anchor-tests";
 import type { SessionLogInput } from "./cloud-types";
 import type { SessionLogTarget } from "./session-log-binding";
 import {
@@ -93,6 +94,8 @@ export function sessionLogFromOutbox(record: SessionLogOutboxRecord): SessionLog
 }
 
 export function sessionLogCloudInput(record: SessionLogOutboxRecord): SessionLogInput {
+  const anchor = anchorCloudInput(record);
+  if (anchor) return anchor;
   return {
     idempotencyKey: record.idempotencyKey,
     sessionBinding: record.sessionBinding,

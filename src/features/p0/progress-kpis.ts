@@ -1,5 +1,6 @@
 import { addUtcDays } from "../plan/active-plan";
 import type { SessionLog } from "../../lib/training";
+import { trainingLogs } from "./anchor-tests";
 
 export interface KpiCardModel {
   id: "bestLink" | "footCuts" | "rpe" | "pain";
@@ -26,12 +27,13 @@ export interface ProgressModel {
   weeks: ProgressWeek[];
 }
 
-type LogSlice = Pick<SessionLog, "createdAt" | "bestLink" | "footCuts" | "rpe" | "pain">;
+type LogSlice = Pick<SessionLog, "createdAt" | "bestLink" | "footCuts" | "rpe" | "pain"> & { sessionId?: string };
 
 export function buildProgress(logs: readonly LogSlice[], today: string): ProgressModel {
+  const sessions = trainingLogs(logs);
   const starts = lastFourMondays(today);
-  const weeks = starts.map((start, index) => summarizeWeek(logs, start, addUtcDays(start, 7), `S${index + 1}`));
-  const hasLogs = logs.length > 0;
+  const weeks = starts.map((start, index) => summarizeWeek(sessions, start, addUtcDays(start, 7), `S${index + 1}`));
+  const hasLogs = sessions.length > 0;
   const latest = [...weeks].reverse().find((week) => week.sessions > 0) ?? weeks[weeks.length - 1];
   const baseline = weeks.find((week) => week.sessions > 0) ?? weeks[0];
   const cards: KpiCardModel[] = [
