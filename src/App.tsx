@@ -76,6 +76,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { MultiPills } from "@/features/profile/multi-pills";
 import { ProfilePhotoPicker } from "@/features/profile/ProfilePhotoPicker";
 import { UserProfile } from "@/features/profile/UserProfile";
 import { AVATAR_REFRESH_DELAY_MS, avatarRetryDelayMs, createAvatarSignedUrl, removeAvatar, uploadAvatar } from "@/features/cloud/cloud-avatar";
@@ -117,6 +118,8 @@ import {
   buildProfileFromQuestionnaireForm,
   calculateQuestionnaireCompletion
 } from "@/lib/profile-questionnaire";
+import { cloudBaselineState } from "@/lib/cloud-baseline";
+import { appendMultiFieldValues, normalizeQuestionnaireDraft } from "@/lib/questionnaire-multi";
 import { cn } from "@/lib/utils";
 import { GuidedSessionFlow } from "@/features/guided-session/GuidedSessionFlow";
 import { GuidedResumeBanner } from "@/features/guided-session/GuidedResumeBanner";
@@ -591,13 +594,6 @@ function normalizeNumberText(value) {
   return Number.isFinite(parsed) ? formatStepperValue(parsed, 0.5) : String(value ?? "");
 }
 
-function splitMultiValue(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function inferChoiceValue(value, options = []) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -613,31 +609,6 @@ function inferChoiceValue(value, options = []) {
     return lowered.includes(valueText) || lowered.includes(labelText) || searchableWords.some((word) => lowered.includes(word));
   });
   return fuzzy?.value || raw;
-}
-
-function inferMultiValues(value, options = []) {
-  const tokens = splitMultiValue(value);
-  const lowered = String(value || "").toLowerCase();
-  const selected = new Set();
-  tokens.forEach((token) => {
-    const match = options.find((option) => option.value === token || option.label === token);
-    selected.add(match?.value || token);
-  });
-  options.forEach((option) => {
-    const valueText = String(option.value || "").toLowerCase();
-    const labelText = String(option.label || "").toLowerCase();
-    const searchableWords = `${valueText} ${labelText}`
-      .split(/[^a-z0-9áéíóúñ]+/i)
-      .filter((word) => word.length >= 5);
-    if (
-      (valueText && lowered.includes(valueText)) ||
-      (labelText && lowered.includes(labelText)) ||
-      searchableWords.some((word) => lowered.includes(word))
-    ) {
-      selected.add(option.value);
-    }
-  });
-  return Array.from(selected).filter(Boolean);
 }
 
 function NumberStepper({ field, id, name, value, onValueChange }) {
@@ -736,51 +707,6 @@ function ChoicePills({ field, name, value, onValueChange }) {
   );
 }
 
-function MultiPills({ field, name, value, onValueChange }) {
-  const [selected, setSelected] = useState(() => inferMultiValues(value, field.options));
-
-  useEffect(() => {
-    setSelected(inferMultiValues(value, field.options));
-  }, [field.options, value]);
-
-  function toggle(optionValue) {
-    const next = selected.includes(optionValue)
-      ? selected.filter((item) => item !== optionValue)
-      : [...selected, optionValue];
-    setSelected(next);
-    onValueChange?.(next.join(", "));
-  }
-
-  return (
-    <div className="space-y-2">
-      {selected.map((item) => (
-        <input key={`${name}-hidden-${item}`} type="hidden" name={name} value={item} />
-      ))}
-      <div className="flex flex-wrap gap-2">
-        {(field.options || []).map((option) => {
-          const active = selected.includes(option.value);
-          return (
-            <button
-              key={`${name}-${option.value}`}
-              type="button"
-              aria-pressed={active}
-              className={cn(
-                "inline-flex min-h-10 items-center justify-center rounded-full border px-3.5 py-1.5 text-center text-sm font-medium leading-tight transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                active
-                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                  : "border-border bg-background/55 text-foreground hover:border-primary/60 hover:bg-primary/10"
-              )}
-              onClick={() => toggle(option.value)}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function QuestionnaireFieldControl({ field, profile, prefix = "questionnaire", value, onValueChange }) {
   const id = `${prefix}-${field.name}`;
   const controlled = typeof onValueChange === "function";
@@ -829,7 +755,7 @@ function createQuestionnaireFormData(draft) {
     section.fields.forEach((field) => {
       const value = draft[field.name];
       if (field.kind === "multi") {
-        splitMultiValue(value).forEach((item) => form.append(field.name, item));
+        appendMultiFieldValues(form, field.name, value, field.options);
         return;
       }
       form.set(field.name, String(value ?? ""));
@@ -840,7 +766,7 @@ function createQuestionnaireFormData(draft) {
 
 function ProfileQuestionnaire({ profile, completion, onSubmit, cloudStatus, theme, onThemeToggle, avatarFile, onAvatarFileChange, avatarUrl, avatarError, avatarSaving, avatarStorageAvailable }) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [draft, setDraft] = useState(() => ({ ...profile }));
+  const [draft, setDraft] = useState(() => normalizeQuestionnaireDraft({ ...profile }));
   const currentSection = QUESTIONNAIRE_SECTIONS[stepIndex];
   const isLastStep = stepIndex === QUESTIONNAIRE_SECTIONS.length - 1;
   const stepProgress = Math.round(((stepIndex + 1) / QUESTIONNAIRE_SECTIONS.length) * 100);
@@ -1289,9 +1215,13 @@ export default function App({
       guidedDefinitions: guidedSessionDefinitions
     });
     const canonical = cloudVerified
-      ? migrateLegacyUserData({ tracker: structuredClone(defaultState), guided: emptyGuidedSessionState(), now: new Date().toISOString(), makeId })
+      ? migrateLegacyUserData({ tracker: cloudBaselineState(), guided: emptyGuidedSessionState(), now: new Date().toISOString(), makeId })
       : loaded.envelope;
-    let envelope = activateAuthenticatedUser(canonical, authUser, { now: new Date().toISOString(), makeId });
+    let envelope = activateAuthenticatedUser(canonical, authUser, {
+      now: new Date().toISOString(),
+      makeId,
+      ...(cloudVerified ? { tracker: cloudBaselineState() } : {})
+    });
     let warning = loaded.warning;
     if (loaded.canPersist && !cloudVerified) {
       const saved = saveUserData(localStorage, envelope);
@@ -1345,7 +1275,10 @@ export default function App({
   const userDataRef = useRef(userData);
   userDataRef.current = userData;
   const activeUser = userData.users[userData.activeUserId];
-  const state = useMemo(() => projectTrackerState(activeUser), [activeUser]);
+  const state = useMemo(
+    () => projectTrackerState(activeUser, cloudVerified ? cloudBaselineState() : defaultState),
+    [activeUser, cloudVerified]
+  );
   const [theme, setTheme] = useState(loadTheme);
   const [activeTab, setActiveTab] = useState(() => appTabForPath(window.location.pathname));
   const [activeWeek, setActiveWeek] = useState("all");
@@ -2217,7 +2150,11 @@ export default function App({
       return;
     }
     const now = new Date().toISOString();
-    const next = resetAuthenticatedUser(userData, authUser, { now, makeId });
+    const next = resetAuthenticatedUser(userData, authUser, {
+      now,
+      makeId,
+      ...(cloudVerified ? { tracker: cloudBaselineState() } : {})
+    });
     userDataRef.current = next;
     setUserData(next);
     setQuestionnaireOpen(true);
