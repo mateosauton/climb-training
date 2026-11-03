@@ -523,7 +523,7 @@ describe("cloud-primary app integration", () => {
     const user = userEvent.setup();
     render(<App cloudRepository={cloud} cloudVerified cloudHydration={hydration} />);
 
-    await user.click(screen.getByRole("button", { name: "Abrir perfil de Mateo" }));
+    await user.click(screen.getByRole("button", { name: "Abrir perfil de Escalador" }));
     fireEvent.change(await screen.findByLabelText("Edad"), { target: { value: "28" } });
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 

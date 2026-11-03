@@ -4,6 +4,8 @@ export type QuestionnaireOption = {
   value: string;
   label: string;
   helper?: string;
+  exclusive?: boolean;
+  exclusiveGroup?: string;
 };
 
 export type QuestionnaireField = {
@@ -88,10 +90,10 @@ const techniqueOptions: QuestionnaireOption[] = [
 ];
 
 const loadOptions: QuestionnaireOption[] = [
-  { value: "Board 1-2/sem", label: "Board 1-2/sem" },
-  { value: "Board 3+/sem", label: "Board 3+/sem" },
-  { value: "Fuerza 1/sem", label: "Fuerza 1/sem" },
-  { value: "Fuerza 2+/sem", label: "Fuerza 2+/sem" },
+  { value: "Board 1-2/sem", label: "Board 1-2/sem", exclusiveGroup: "board-frequency" },
+  { value: "Board 3+/sem", label: "Board 3+/sem", exclusiveGroup: "board-frequency" },
+  { value: "Fuerza 1/sem", label: "Fuerza 1/sem", exclusiveGroup: "strength-frequency" },
+  { value: "Fuerza 2+/sem", label: "Fuerza 2+/sem", exclusiveGroup: "strength-frequency" },
   { value: "Hangboard", label: "Hangboard" },
   { value: "Campus", label: "Campus" },
   { value: "Movilidad", label: "Movilidad" },
@@ -298,7 +300,7 @@ export const QUESTIONNAIRE_SECTIONS: QuestionnaireSection[] = [
           { value: "Piel limitada", label: "Piel limitada" },
           { value: "Sueno bajo", label: "Sueno bajo" },
           { value: "Energia baja", label: "Energia baja" },
-          { value: "Sin senales", label: "Sin senales" }
+          { value: "Sin senales", label: "Sin senales", exclusive: true }
         ]
       }
     ]
@@ -315,7 +317,7 @@ export const QUESTIONNAIRE_SECTIONS: QuestionnaireSection[] = [
         kind: "multi",
         span: "full",
         options: [
-          { value: "Ninguna relevante", label: "Ninguna" },
+          { value: "Ninguna relevante", label: "Ninguna", exclusive: true },
           { value: "Polea / A2 / dedos", label: "Dedos / polea" },
           { value: "Codo", label: "Codo" },
           { value: "Hombro", label: "Hombro" },
