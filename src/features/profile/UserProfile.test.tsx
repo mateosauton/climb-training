@@ -7,7 +7,7 @@ import { UserProfile } from "./UserProfile";
 
 function renderProfile(overrides: Record<string, unknown> = {}) {
   const onSave = vi.fn();
-  render(
+  const view = render(
     <UserProfile
       profile={{ ...defaultState.profile, name: "Mateo Sautón", age: "28", location: "Salta", strengths: "Regletas", limiters: "Lectura de pies" }}
       goals={{ ...defaultState.goals, currentGrade: "V6", targetGrade: "V8" }}
@@ -28,7 +28,7 @@ function renderProfile(overrides: Record<string, unknown> = {}) {
       {...overrides}
     />
   );
-  return { onSave };
+  return { onSave, unmount: view.unmount };
 }
 
 describe("UserProfile", () => {
@@ -78,9 +78,43 @@ describe("UserProfile", () => {
   });
 
   it("falls back to plan progress when grades are not comparable", () => {
-    renderProfile({ goals: { ...defaultState.goals, currentGrade: "V6", targetGrade: "7a" }, planProgress: 42 });
+    renderProfile({ goals: { ...defaultState.goals, currentGrade: "V6", targetGrade: "7a" }, planStatus: "ready", planProgress: 42 });
     expect(screen.getByText("42%")).toBeInTheDocument();
     expect(screen.getByText("Progreso del plan")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Progreso: 42%" })).toBeInTheDocument();
+  });
+
+  it("shows Sin plan activo and no plan bar when there is no plan", () => {
+    renderProfile({ goals: { ...defaultState.goals, currentGrade: "V6", targetGrade: "7a" }, planStatus: "empty", planProgress: null });
+    expect(screen.queryByText("Plan activo")).not.toBeInTheDocument();
+    expect(screen.getByText("Sin plan activo")).toBeInTheDocument();
+    expect(screen.queryByText("Progreso del plan")).not.toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.getByText("Completá grados comparables")).toBeInTheDocument();
+  });
+
+  it("shows Plan activo only when a plan is ready", () => {
+    renderProfile({ planStatus: "ready" });
+    expect(screen.getByText("Plan activo")).toBeInTheDocument();
+    expect(screen.queryByText("Sin plan activo")).not.toBeInTheDocument();
+  });
+
+  it("shows the demonstration plan label", () => {
+    renderProfile({ planStatus: "demo" });
+    expect(screen.getByText("Plan de demostración")).toBeInTheDocument();
+    expect(screen.queryByText("Plan activo")).not.toBeInTheDocument();
+  });
+
+  it("does not claim an active plan while it is loading or unreadable", () => {
+    const view = renderProfile({ planStatus: "loading" });
+    expect(screen.getByText("Cargando…")).toBeInTheDocument();
+    expect(screen.queryByText("Plan activo")).not.toBeInTheDocument();
+    view.unmount();
+    renderProfile({ planStatus: "error" });
+    expect(screen.queryByText("Plan activo")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sin plan activo")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
   });
 
   it("moves focus to the editor from the header action", async () => {
