@@ -72,20 +72,23 @@ describe("plan screen", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "Tu plan" })).toBeInTheDocument();
-    expect(screen.getByText("Semana 1 · Fuerza y potencia")).toBeInTheDocument();
-    expect(screen.getByText("Hoy · lunes 2")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Esta semana" })).toBeInTheDocument();
+    expect(screen.getByText("Semana 1 de 1 · Fuerza y potencia")).toBeInTheDocument();
+    expect(screen.getByText("HOY · LUN 2")).toBeInTheDocument();
     expect(screen.getByText("Fuerza de dedos")).toBeInTheDocument();
-    expect(screen.getByText("7x3")).toBeInTheDocument();
+    expect(screen.getByText(/7x3/)).toBeInTheDocument();
     expect(screen.queryByText(/limit \+ fuerza/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Plan de demostración")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Empezar sesión" }));
+    await user.click(screen.getByRole("button", { name: "Empezar" }));
     expect(onStartSession).toHaveBeenCalledWith("plan-fingers-next");
 
-    await user.click(screen.getByRole("button", { name: "M 3" }));
-    expect(screen.getByText("No hay sesiones este día.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "M 3" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Saltar" }));
+    expect(screen.getByText(/Saltaste esta sesión/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Deshacer" }));
+    await user.click(screen.getByRole("button", { name: "Dolor → cambiar a movilidad" }));
+    expect(screen.getByRole("heading", { name: "Movilidad" })).toBeInTheDocument();
+    expect(screen.getByText("Fuerza de dedos")).toBeInTheDocument();
   });
 
   it("renders a second active plan with different sessions", () => {
@@ -144,7 +147,7 @@ describe("plan screen", () => {
     const first = render(<App cloudVerified cloudHydration={hydration("plan-fingers", "Fuerza de dedos", "2026-11-02")} />);
     await user.click(screen.getAllByRole("tab", { name: "Plan" })[0]);
     expect(screen.getByTestId("plan-screen")).toHaveAttribute("data-plan-id", "plan-fingers");
-    expect(screen.getByRole("button", { name: "Empezar sesión" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Empezar" })).toBeInTheDocument();
     expect(screen.getByText("Fuerza de dedos")).toBeInTheDocument();
     expect(screen.queryByText(/limit \+ fuerza/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("demo-plan-banner")).not.toBeInTheDocument();

@@ -125,13 +125,13 @@ import { GuidedSessionFlow } from "@/features/guided-session/GuidedSessionFlow";
 import { GuidedResumeBanner } from "@/features/guided-session/GuidedResumeBanner";
 import { guidedSessionDefinitions } from "@/features/guided-session/guided-session-data";
 import { appendChangedFacts, projectTrackerState } from "@/features/user-data/user-facts";
-import { buildUserDataExport, userDataExportFilename } from "@/features/user-data/user-data-export";
+import { buildSessionLogsCsv, buildUserDataExport, sessionLogsCsvFilename, userDataExportFilename } from "@/features/user-data/user-data-export";
 import { createUserGuidedStorage } from "@/features/user-data/user-guided-storage";
 import { migrateLegacyUserData } from "@/features/user-data/user-data-migration";
 import { emptyGuidedSessionState } from "@/features/guided-session/guided-session-storage";
 import { activateAuthenticatedUser, resetAuthenticatedUser } from "@/features/auth/authenticated-user";
 import { loadUserData, persistRecoveryBeforeCloudEffect, saveUserData } from "@/features/user-data/user-data-storage";
-import { cloudLogSessionId, openRunFromHydration, resolveSessionLogTarget } from "@/features/cloud/session-log-binding";
+import { openRunFromHydration, resolveSessionLogTarget, sessionLogFromCloudRow } from "@/features/cloud/session-log-binding";
 import { sessionLogFailureMessage } from "@/features/cloud/session-log-errors";
 import { listPendingSessionLogs } from "@/features/cloud/session-log-outbox";
 import { mergePendingSessionLogs, retryPendingSessionLogs, saveSessionLog } from "@/features/cloud/session-log-save";
@@ -146,6 +146,15 @@ import { appTabForPath } from "@/features/auth/auth-routes";
 import { buildSessionRecommendation } from "@/features/session-recommendation/session-recommendation";
 import { activePlanFromHydration, DEMO_PLAN_LABEL } from "@/features/plan/active-plan";
 import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
+import { anchorLogFields, trainingLogs } from "@/features/p0/anchor-tests";
+import { ProgressDashboard } from "@/features/p0/ProgressDashboard";
+import { SessionLogger } from "@/features/p0/SessionLogger";
+import {
+  buildLoggerDraft,
+  emptyPlanWeekEdits,
+  loadPlanWeekEdits,
+  savePlanWeekEdits
+} from "@/features/p0/plan-week";
 import {
   defaultState,
   exerciseLibrary,
@@ -275,6 +284,14 @@ const tabs = [
   { value: "profile", label: "Perfil", icon: UserRound }
 ];
 const primaryTabs = tabs.filter((tab) => tab.value !== "profile");
+const cloudNav = [
+  { value: "plan", label: "Plan", icon: CalendarDays },
+  { value: "log", label: "Sesiones", icon: ClipboardList },
+  { value: "dashboard", label: "Progreso", icon: BarChart3 },
+  { value: "video", label: "Video", icon: Film },
+  { value: "profile", label: "Perfil", icon: UserRound }
+];
+const cloudMobileNav = cloudNav.filter((item) => item.value !== "video");
 
 function cloneData(value) {
   if (typeof structuredClone === "function") return structuredClone(value);
@@ -976,7 +993,8 @@ function TrainingSidebar({
   accountEmail,
   onSignOut,
   authError,
-  signingOut
+  signingOut,
+  navItems = primaryTabs
 }) {
   const { setOpenMobile } = useSidebar();
   const athleteName = profile.name || "Escalador";
@@ -1089,7 +1107,7 @@ function TrainingSidebar({
           <SidebarGroupLabel>Navegacion</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {primaryTabs.map(({ value, label, icon: Icon }) => (
+              {navItems.map(({ value, label, icon: Icon }) => (
                 <SidebarMenuItem key={value}>
                   <SidebarMenuButton
                     type="button"
@@ -1244,17 +1262,7 @@ export default function App({
         },
         supersedes: fact.supersedes_id || fact.supersedes || null
       }));
-      const sessionLogs = (cloudHydration.sessionLogs || []).map((log) => ({
-        ...log.metrics,
-        id: typeof log.idempotency_key === "string" ? log.idempotency_key : log.id,
-        sessionId: cloudLogSessionId(log),
-        createdAt: log.created_at || log.createdAt,
-        notes: log.body || log.metrics?.notes || "",
-        rpe: log.rpe ?? log.metrics?.rpe ?? 0,
-        pump: log.pump ?? log.metrics?.pump ?? 0,
-        pain: log.pain ?? log.metrics?.pain ?? 0,
-        energy: log.energy ?? log.metrics?.energy ?? 0
-      }));
+      const sessionLogs = (cloudHydration.sessionLogs || []).map(sessionLogFromCloudRow);
       envelope = { ...envelope, users: { ...envelope.users, [envelope.activeUserId]: {
         ...active, facts, sessionLogs,
         guidedSessions: cloudHydration.guided?.schemaVersion === 1 ? cloudHydration.guided : emptyGuidedSessionState()
@@ -1299,6 +1307,13 @@ export default function App({
     return code ? sessionLogFailureMessage(code) : "";
   });
   const [savedRecommendation, setSavedRecommendation] = useState(null);
+  const [weekEdits, setWeekEdits] = useState(() => {
+    if (!cloudVerified) return emptyPlanWeekEdits();
+    const initialPlan = activePlanFromHydration(cloudHydration);
+    return initialPlan.status === "ready" ? loadPlanWeekEdits(localStorage, initialPlan.plan.planId) : emptyPlanWeekEdits();
+  });
+  const [quickLog, setQuickLog] = useState({ status: "idle", message: "", sessionId: "" });
+  const [anchorSave, setAnchorSave] = useState({ status: "idle", message: "" });
   const [videoFile, setVideoFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoMeta, setVideoMeta] = useState(null);
@@ -1450,7 +1465,8 @@ export default function App({
 
   const selectedSession = sessionById(sessions, selectedSessionId);
   const selectedExercises = exercisesBySessionId?.[selectedSession?.id] || (selectedSession && !cloudVerified ? getSessionExercises(selectedSession) : []);
-  const completedSessionIds = useMemo(() => new Set(state.logs.map((log) => log.sessionId)), [state.logs]);
+  const trainingSessionLogs = useMemo(() => trainingLogs(state.logs), [state.logs]);
+  const completedSessionIds = useMemo(() => new Set(trainingSessionLogs.map((log) => log.sessionId)), [trainingSessionLogs]);
   const guidedSnapshot = activeUser.guidedSessions;
   const activeGuidedRun = guidedSnapshot.activeRun;
   const guidedCompletedSessionIds = new Set(
@@ -1475,11 +1491,11 @@ export default function App({
 
   const metrics = useMemo(() => {
     const completed = completedSessionIds.size;
-    const bestLink = Math.max(0, ...state.logs.map((log) => Number(log.bestLink || 0)));
-    const avgRpe = average(state.logs.map((log) => log.rpe));
-    const avgPain = average(state.logs.map((log) => log.pain));
-    return { completed, bestLink, avgRpe, avgPain, totalLogs: state.logs.length };
-  }, [completedSessionIds, state.logs]);
+    const bestLink = Math.max(0, ...trainingSessionLogs.map((log) => Number(log.bestLink || 0)));
+    const avgRpe = average(trainingSessionLogs.map((log) => log.rpe));
+    const avgPain = average(trainingSessionLogs.map((log) => log.pain));
+    return { completed, bestLink, avgRpe, avgPain, totalLogs: trainingSessionLogs.length };
+  }, [completedSessionIds, trainingSessionLogs]);
 
   const completionPercent = sessions.length ? Math.round((metrics.completed / sessions.length) * 100) : 0;
   const profilePlanStatus = !cloudVerified ? "demo" : (planNotice ?? "ready");
@@ -1529,6 +1545,17 @@ export default function App({
   }, [state.logs]);
 
   const recentPain = useMemo(() => average(state.logs.slice(-4).map((log) => log.pain)), [state.logs]);
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const loggerDraft = useMemo(() => {
+    if (!cloudVerified || !sessions.length) return null;
+    return buildLoggerDraft({
+      sessions,
+      edits: weekEdits,
+      today: todayISO,
+      logs: state.logs,
+      sessionId: quickLog.sessionId || selectedSessionId
+    });
+  }, [cloudVerified, quickLog.sessionId, selectedSessionId, sessions, state.logs, todayISO, weekEdits]);
   const risk = useMemo(() => {
     const recent = state.logs.slice(-4);
     if (!recent.length) {
@@ -1568,9 +1595,11 @@ export default function App({
   );
   const canShowVideoAdvice = Boolean(videoFile && videoMeta);
   const selectedDate = useMemo(() => selectedSession ? new Date(`${selectedSession.date}T12:00:00`) : new Date(), [selectedSession]);
+  const navItems = cloudVerified ? cloudNav : tabs;
+  const mobileNav = cloudVerified ? cloudMobileNav : primaryTabs;
   const activeTabMeta = useMemo(
-    () => tabs.find((tab) => tab.value === activeTab) || tabs[0],
-    [activeTab]
+    () => navItems.find((tab) => tab.value === activeTab) || navItems[0],
+    [activeTab, navItems]
   );
   const questionnaireProfile = useMemo(
     () => ({ ...state.profile, project: state.goals.project, focus: state.goals.focus }),
@@ -1583,9 +1612,12 @@ export default function App({
 
   const exportSnapshot = useMemo(() => {
     const exportedAt = new Date().toISOString();
+    const logs = userData.users[userData.activeUserId]?.sessionLogs ?? [];
     return {
       json: buildUserDataExport(userData, exportedAt),
-      filename: userDataExportFilename(userData, exportedAt)
+      filename: userDataExportFilename(userData, exportedAt),
+      csv: buildSessionLogsCsv(logs),
+      csvFilename: sessionLogsCsvFilename(userData, exportedAt)
     };
   }, [userData]);
   const exportJson = exportSnapshot.json;
@@ -1987,6 +2019,132 @@ export default function App({
     }
   }
 
+  async function submitQuickLog(values) {
+    if (values.rpe < 1 || values.rpe > 10 || values.pain < 0 || values.pain > 10 || values.attempts < 0 || values.attempts > 200) {
+      setQuickLog((current) => ({ ...current, status: "error", message: "Revisá RPE (1-10), dolor (0-10) e intentos (0-200)." }));
+      return;
+    }
+    if (values.bestLink != null && (values.bestLink < 0 || values.bestLink > 500)) {
+      setQuickLog((current) => ({ ...current, status: "error", message: "Mejor link: usá un valor entre 0 y 500." }));
+      return;
+    }
+    if (values.footCuts != null && (values.footCuts < 0 || values.footCuts > 200)) {
+      setQuickLog((current) => ({ ...current, status: "error", message: "Foot-cuts: usá un valor entre 0 y 200." }));
+      return;
+    }
+    if (logSaveLock.current) return;
+    logSaveLock.current = true;
+    setQuickLog((current) => ({ ...current, status: "saving", message: "" }));
+    try {
+      const binding = resolveSessionLogTarget({
+        selectedSessionId: values.planSessionId,
+        planSessions: projection?.status === "ready" ? projection.plan.sessions : hydration?.activePlan?.sessions ?? [],
+        openRun: openRunFromHydration(hydration?.openSessionRun)
+      });
+      const outcome = await saveSessionLog({
+        storage: localStorage,
+        idempotencyKey: makeId(),
+        createdAt: new Date().toISOString(),
+        notes: values.notes,
+        metrics: {
+          rpe: values.rpe,
+          pump: 0,
+          pain: values.pain,
+          attempts: values.attempts,
+          moves: 0,
+          bestLink: values.bestLink ?? 0,
+          footCuts: values.footCuts ?? 0,
+          pullWeight: 0,
+          sleep: 7,
+          energy: 7
+        },
+        binding: values.mobility ? { ...binding, localSessionId: `${values.planSessionId}::mobility` } : binding,
+        persistEnvelope: (log) => {
+          const current = userDataRef.current;
+          const userId = current.activeUserId;
+          const existing = current.users[userId].sessionLogs;
+          const sessionLogs = existing.some((item) => item.id === log.id) ? existing : [...existing, log];
+          const next = { ...current, users: { ...current.users, [userId]: { ...current.users[userId], sessionLogs } } };
+          try {
+            const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+            return { ...recovery, envelope: next };
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : "write", envelope: next };
+          }
+        },
+        appendSessionLog: cloudRepository ? (input) => cloudRepository.appendSessionLog(input) : null
+      });
+      setPendingSessionLogs(listPendingSessionLogs(localStorage));
+      if (outcome.status === "blocked") {
+        setQuickLog((current) => ({ ...current, status: "error", message: outcome.message }));
+        return;
+      }
+      userDataRef.current = outcome.envelope;
+      setUserData(outcome.envelope);
+      if (outcome.status === "pending") {
+        setSessionLogSyncMessage(outcome.message);
+        setQuickLog((current) => ({ ...current, status: "error", message: outcome.message }));
+        return;
+      }
+      setSessionLogSyncMessage("");
+      if (outcome.warning) setUserDataWarning(outcome.warning);
+      selectSession(values.planSessionId);
+      setQuickLog((current) => ({ ...current, status: "saved", message: "" }));
+    } finally {
+      logSaveLock.current = false;
+    }
+  }
+
+  async function submitAnchor(draft) {
+    if (logSaveLock.current) return;
+    logSaveLock.current = true;
+    setAnchorSave({ status: "saving", message: "" });
+    const fields = anchorLogFields(draft);
+    try {
+      const outcome = await saveSessionLog({
+        storage: localStorage,
+        idempotencyKey: makeId(),
+        createdAt: new Date().toISOString(),
+        notes: fields.notes,
+        metrics: fields.metrics,
+        binding: resolveSessionLogTarget({
+          selectedSessionId: fields.sessionId,
+          planSessions: projection?.status === "ready" ? projection.plan.sessions : hydration?.activePlan?.sessions ?? [],
+          openRun: openRunFromHydration(hydration?.openSessionRun)
+        }),
+        persistEnvelope: (log) => {
+          const current = userDataRef.current;
+          const userId = current.activeUserId;
+          const existing = current.users[userId].sessionLogs;
+          const sessionLogs = existing.some((item) => item.id === log.id) ? existing : [...existing, log];
+          const next = { ...current, users: { ...current.users, [userId]: { ...current.users[userId], sessionLogs } } };
+          try {
+            const recovery = persistRecoveryBeforeCloudEffect(localStorage, next);
+            return { ...recovery, envelope: next };
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : "write", envelope: next };
+          }
+        },
+        appendSessionLog: cloudRepository ? (input) => cloudRepository.appendSessionLog(input) : null
+      });
+      setPendingSessionLogs(listPendingSessionLogs(localStorage));
+      if (outcome.status === "blocked") {
+        setAnchorSave({ status: "error", message: outcome.message });
+        return;
+      }
+      userDataRef.current = outcome.envelope;
+      setUserData(outcome.envelope);
+      if (outcome.status === "pending") {
+        setAnchorSave({ status: "error", message: outcome.message });
+        return;
+      }
+      if (outcome.warning) setUserDataWarning(outcome.warning);
+      setAnchorSave({ status: "saved", message: "Ancla guardada." });
+    } finally {
+      logSaveLock.current = false;
+    }
+  }
+
   function clearLogForm() {
     setLogForm(defaultLogValues);
     setLogError("");
@@ -2134,14 +2292,22 @@ export default function App({
     updateActiveUser((current) => ({ ...current, videoAnalyses: current.videoAnalyses.filter((video) => video.id !== id) }));
   }
 
-  function downloadJson() {
-    const blob = new Blob([exportJson], { type: "application/json" });
+  function downloadTextFile(contents, type, filename) {
+    const blob = new Blob([contents], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = exportSnapshot.filename;
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function downloadJson() {
+    downloadTextFile(exportJson, "application/json", exportSnapshot.filename);
+  }
+
+  function downloadCsv() {
+    downloadTextFile(exportSnapshot.csv, "text/csv;charset=utf-8", exportSnapshot.csvFilename);
   }
 
   async function resetData() {
@@ -2200,8 +2366,9 @@ export default function App({
               onSignOut={onSignOut}
               authError={authError}
               signingOut={signingOut}
+              navItems={navItems}
             />
-            <SidebarInset className="min-w-0 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-0">
+            <SidebarInset className={cn("min-w-0 pb-[calc(env(safe-area-inset-bottom)+6rem)] md:pb-0", cloudVerified && "plan-screen")}>
               {importStatus !== "idle" && importStatus !== "completed" ? (
                 <div role={importStatus === "failed" ? "alert" : "status"} className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3 text-sm md:mx-4">
                   <div>
@@ -2234,7 +2401,7 @@ export default function App({
                   <Button type="button" variant="outline" onClick={() => void retrySessionLogSync()}>Reintentar sincronización</Button>
                 </div>
               ) : null}
-              <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:h-16 md:px-4">
+              <header className={cn("sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b px-3 backdrop-blur md:h-16 md:px-4", cloudVerified ? "border-[var(--plan-line)] bg-[var(--plan-ground)]/95 text-[var(--plan-ink)]" : "border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/80")}>
                 <SidebarTrigger className="-ml-1" />
                 <Separator orientation="vertical" className="mr-1 data-vertical:h-4 data-vertical:self-auto" />
                 <Breadcrumb className="min-w-0 flex-1">
@@ -2270,9 +2437,21 @@ export default function App({
         {!cloudVerified ? (
           <p className="mb-4 rounded-lg border border-border/70 bg-card/80 px-4 py-3 text-sm" data-testid="demo-plan-banner">{DEMO_PLAN_LABEL}. El calendario de julio 2026 es un ejemplo de desarrollo y no es el plan de un atleta.</p>
         ) : null}
-        {planNotice && activeTab === "dashboard" ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : null}
+        {planNotice && activeTab === "dashboard" && !cloudVerified ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : null}
 
         <TabsContent value="dashboard" className="mt-0">
+          {cloudVerified ? (
+            <ProgressDashboard
+                logs={state.logs}
+                today={new Date().toISOString().slice(0, 10)}
+                athleteInitials={(state.profile.name || "E").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E"}
+                onOpenProfile={() => setActiveTab("profile")}
+                onSaveAnchor={(draft) => { void submitAnchor(draft); }}
+                anchorStatus={anchorSave.status}
+                anchorMessage={anchorSave.message}
+              />
+          ) : (
+          <>
           <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
             <Card className="border-border/70 bg-card/90">
               <CardHeader className="gap-3 p-4 sm:p-5">
@@ -2535,6 +2714,8 @@ export default function App({
               </CardContent>
             </Card>
           </section>
+          </>
+          )}
         </TabsContent>
 
         <TabsContent value="plan" className="mt-0">
@@ -2547,7 +2728,18 @@ export default function App({
                 completedSessionIds={new Set([...completedSessionIds, ...guidedCompletedSessionIds])}
                 today={new Date().toISOString().slice(0, 10)}
                 athleteInitials={(state.profile.name || "E").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "E"}
+                edits={weekEdits}
+                recentPain={recentPain}
+                onEditsChange={(next) => {
+                  setWeekEdits(next);
+                  if (projection?.status === "ready") savePlanWeekEdits(localStorage, projection.plan.planId, next);
+                }}
                 resumeLabel={activeGuidedRun?.status === "paused" && guidedDefinitions[activeGuidedRun.sessionId] ? `Continuar sesión · Bloque ${activeGuidedRun.currentBlockIndex + 1} de ${guidedDefinitions[activeGuidedRun.sessionId].blocks.length}` : null}
+                onOpenLogger={(sessionId) => {
+                  selectSession(sessionId);
+                  setQuickLog({ status: "idle", message: "", sessionId });
+                  setActiveTab("log");
+                }}
                 onStartSession={(sessionId) => {
                   selectSession(sessionId);
                   setGuidedSessionOpen(true);
@@ -2774,7 +2966,21 @@ export default function App({
         </TabsContent>
 
         <TabsContent value="log" className="mt-0">
-          {planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
+          {cloudVerified && !planNotice && loggerDraft ? (
+            <SessionLogger
+              draft={loggerDraft}
+              sessions={sessions}
+              status={quickLog.status}
+              message={quickLog.message}
+              onSessionChange={(sessionId) => {
+                selectSession(sessionId);
+                setQuickLog({ status: "idle", message: "", sessionId });
+              }}
+              onSave={(values) => { void submitQuickLog(values); }}
+              onOpenProgress={() => setActiveTab("dashboard")}
+              onBack={() => setActiveTab("plan")}
+            />
+          ) : planNotice ? <ActivePlanNotice status={planNotice} onRetry={() => void refreshActivePlan()} /> : (
           <section className="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
             <Card className="border-border/70 bg-card/90">
               <CardHeader>
@@ -3163,6 +3369,7 @@ export default function App({
             theme={theme}
             onCopyJson={() => void navigator.clipboard?.writeText(exportJson)}
             onDownloadJson={downloadJson}
+            onDownloadCsv={downloadCsv}
             onReset={() => void resetData()}
             onSignOut={onSignOut}
             onOpenQuestionnaire={() => setQuestionnaireOpen(true)}
@@ -3352,6 +3559,10 @@ export default function App({
                       <Download className="size-4" />
                       Descargar
                     </Button>
+                    <Button type="button" variant="outline" onClick={downloadCsv}>
+                      <Download className="size-4" />
+                      Descargar CSV
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
@@ -3416,13 +3627,13 @@ export default function App({
         </TabsContent>
               </div>
 
-              <TabsList className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 grid w-auto grid-cols-4 rounded-xl border border-border bg-card/95 p-1 shadow-2xl group-data-horizontal/tabs:h-16 supports-[backdrop-filter]:backdrop-blur md:hidden">
-                {primaryTabs.map(({ value, label, icon: Icon }) => (
+              <TabsList className={cn("fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-50 grid w-auto grid-cols-4 rounded-xl border p-1 shadow-2xl group-data-horizontal/tabs:h-16 supports-[backdrop-filter]:backdrop-blur md:hidden", cloudVerified ? "border-[var(--plan-line)] bg-[var(--plan-ground)]/95 text-[var(--plan-ink)]" : "border-border bg-card/95")}>
+                {mobileNav.map(({ value, label, icon: Icon }) => (
                   <TabsTrigger
                     key={value}
                     value={value}
                     aria-label={label}
-                    className="h-full flex-col gap-0.5 px-1 text-[0.7rem]"
+                    className={cn("h-full flex-col gap-0.5 px-1 text-[0.7rem]", cloudVerified && "text-[var(--plan-muted)] hover:text-[var(--plan-ink)] data-active:bg-[var(--plan-tint)] data-active:text-[var(--plan-deep)] dark:text-[var(--plan-muted)] dark:data-active:border-transparent dark:data-active:bg-[var(--plan-tint)] dark:data-active:text-[var(--plan-deep)]")}
                   >
                     <Icon aria-hidden="true" className="size-4" />
                     <span>{label}</span>

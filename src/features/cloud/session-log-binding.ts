@@ -1,3 +1,4 @@
+import type { SessionLog } from "../../lib/training";
 import type { SessionBinding } from "./cloud-types";
 
 export interface OpenSessionRunRef {
@@ -101,4 +102,57 @@ export function cloudLogSessionId(log: {
   if (typeof log.metrics?.session_id === "string") return log.metrics.session_id;
   if (typeof log.session_id === "string") return log.session_id;
   return "w1d1";
+}
+
+function cloudRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function firstNumber(fallback: number, ...values: unknown[]): number {
+  for (const value of values) {
+    const parsed = finiteNumber(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return fallback;
+}
+
+/** Map one hydrate_athlete_state session_logs row onto the client log the backup exports. */
+export function sessionLogFromCloudRow(row: unknown): SessionLog {
+  const log = cloudRecord(row) ?? {};
+  const metrics = cloudRecord(log.metrics) ?? {};
+  const body = typeof log.body === "string" ? log.body : "";
+  const metricNotes = typeof metrics.notes === "string" ? metrics.notes : "";
+  return {
+    id: typeof log.idempotency_key === "string" ? log.idempotency_key : typeof log.id === "string" ? log.id : "",
+    sessionId: cloudLogSessionId({
+      session_binding: log.session_binding,
+      plan_session_id: log.plan_session_id,
+      legacy_session_key: log.legacy_session_key,
+      session_id: log.session_id,
+      metrics: { sessionId: metrics.sessionId, session_id: metrics.session_id }
+    }),
+    createdAt: typeof log.created_at === "string" && log.created_at
+      ? log.created_at
+      : typeof log.createdAt === "string" ? log.createdAt : "",
+    notes: body || metricNotes,
+    rpe: firstNumber(0, log.rpe, metrics.rpe),
+    pump: firstNumber(0, log.pump, metrics.pump),
+    pain: firstNumber(0, log.pain, metrics.pain),
+    energy: firstNumber(0, log.energy, metrics.energy),
+    attempts: firstNumber(0, log.attempts, metrics.attempts),
+    moves: firstNumber(0, log.moves, metrics.moves),
+    bestLink: firstNumber(0, log.best_link, log.bestLink, metrics.best_link, metrics.bestLink),
+    footCuts: firstNumber(0, log.foot_cuts, log.footCuts, metrics.foot_cuts, metrics.footCuts),
+    pullWeight: firstNumber(0, log.pull_weight, log.pullWeight, metrics.pull_weight, metrics.pullWeight),
+    sleep: firstNumber(0, log.sleep, metrics.sleep)
+  };
 }

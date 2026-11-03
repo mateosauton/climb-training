@@ -1,4 +1,5 @@
 import type { SessionLog } from "@/lib/training";
+import { trainingLogs } from "@/features/p0/anchor-tests";
 
 export type TrainingLoad = "Sin datos" | "Baja" | "Moderada" | "Alta";
 
@@ -38,12 +39,12 @@ export function formatAgeLocation(age: string, location: string): string {
 }
 
 export function calculateCurrentWeekSessions(logs: SessionLog[], now: Date): number {
-  return logsInWeek(logs, now).length;
+  return logsInWeek(trainingLogs(logs), now).length;
 }
 
 export function calculateWeeklyStreak(logs: SessionLog[], now: Date): number {
   const activeWeeks = new Set(
-    logs
+    trainingLogs(logs)
       .map((entry) => new Date(entry.createdAt))
       .filter((date) => Number.isFinite(date.getTime()))
       .map(weekStart)
@@ -55,7 +56,7 @@ export function calculateWeeklyStreak(logs: SessionLog[], now: Date): number {
 }
 
 export function calculateTrainingLoad(logs: SessionLog[], now: Date): TrainingLoad {
-  const currentLogs = logsInWeek(logs, now);
+  const currentLogs = logsInWeek(trainingLogs(logs), now);
   if (currentLogs.length === 0) return "Sin datos";
   const workload = currentLogs.reduce(
     (total, entry) => total + Math.max(0, entry.rpe) * (Math.max(0, entry.moves) + Math.max(0, entry.attempts) * 3),
