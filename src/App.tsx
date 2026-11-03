@@ -2895,6 +2895,12 @@ export default function App({
                       <AlertDescription>{logError}</AlertDescription>
                     </Alert>
                   ) : null}
+                  <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] z-20 -mx-4 border-t bg-card/95 p-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0">
+                    <Button type="submit" size="lg" className="h-11 w-full md:h-8 md:w-auto">
+                      <Save className="size-4" />
+                      Guardar log
+                    </Button>
+                  </div>
                   <details className="rounded-lg border border-border/70 bg-background/45">
                     <summary className="cursor-pointer px-3 py-3 text-sm font-medium">Más datos (opcional)</summary>
                     <div className="space-y-4 px-3 pb-3">
@@ -2931,12 +2937,6 @@ export default function App({
                       </Field>
                     </div>
                   </details>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="submit">
-                      <Save className="size-4" />
-                      Guardar log
-                    </Button>
-                  </div>
                 </form>
                 )}
               </CardContent>
