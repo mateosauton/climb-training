@@ -47,6 +47,7 @@ export const ONBOARDING_COPY = {
   profileHealthTitle: "Salud",
   profileHealthConnected: "Conectada · solo lectura",
   profileHealthDisconnected: "No conectada. Puedes conectarla cuando quieras.",
+  profileHealthConnect: "Conectar Salud",
   profileHealthDisconnect: "Desconectar Salud"
 } as const;
 

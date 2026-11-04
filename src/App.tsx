@@ -1326,6 +1326,7 @@ export default function App({
   const [showJson, setShowJson] = useState(false);
   const [questionnaireOpen, setQuestionnaireOpen] = useState(false);
   const [healthDismissed, setHealthDismissed] = useState(false);
+  const [healthManual, setHealthManual] = useState(false);
   const [healthRevision, setHealthRevision] = useState(0);
   const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
@@ -2345,23 +2346,22 @@ export default function App({
     });
   }
 
-  const offerHealth = !healthDismissed && shouldOfferHealthOnboarding(authUser.id, authUser.email);
+  const offerHealth = healthManual || (!healthDismissed && shouldOfferHealthOnboarding(authUser.id, authUser.email));
   const healthConnected = isHealthConnected(authUser.id) && healthRevision >= 0;
+
+  function closeHealth(choice: "skip" | "connected") {
+    finishHealthOnboarding(authUser.id, choice);
+    setHealthDismissed(true);
+    setHealthManual(false);
+    setHealthRevision((value) => value + 1);
+    if (!healthManual) setActiveTab("plan");
+  }
 
   if (offerHealth) {
     return (
       <HealthOnboarding
-        onSkip={() => {
-          finishHealthOnboarding(authUser.id, "skip");
-          setHealthDismissed(true);
-          setActiveTab("plan");
-        }}
-        onConnected={() => {
-          finishHealthOnboarding(authUser.id, "connected");
-          setHealthRevision((value) => value + 1);
-          setHealthDismissed(true);
-          setActiveTab("plan");
-        }}
+        onSkip={() => closeHealth("skip")}
+        onConnected={() => closeHealth("connected")}
       />
     );
   }
@@ -3402,6 +3402,7 @@ export default function App({
             onSignOut={onSignOut}
             onOpenQuestionnaire={() => setQuestionnaireOpen(true)}
             healthConnected={healthConnected}
+            onConnectHealth={() => setHealthManual(true)}
             onDisconnectHealth={() => {
               disconnectHealth(authUser.id);
               setHealthRevision((value) => value + 1);

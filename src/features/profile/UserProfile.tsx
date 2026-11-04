@@ -95,6 +95,7 @@ type UserProfileProps = {
   onSignOut: () => void;
   onOpenQuestionnaire: () => void;
   healthConnected?: boolean;
+  onConnectHealth?: () => void;
   onDisconnectHealth?: () => void;
   onToggleTheme: () => void;
   signingOut?: boolean;
@@ -220,6 +221,7 @@ export function UserProfile({
   onSignOut,
   onOpenQuestionnaire,
   healthConnected = false,
+  onConnectHealth,
   onDisconnectHealth,
   onToggleTheme,
   signingOut = false,
@@ -398,6 +400,9 @@ export function UserProfile({
                     </div>
                     {healthConnected && onDisconnectHealth ? (
                       <Button type="button" variant="outline" onClick={onDisconnectHealth}>{ONBOARDING_COPY.profileHealthDisconnect}</Button>
+                    ) : null}
+                    {!healthConnected && onConnectHealth ? (
+                      <Button type="button" variant="outline" onClick={onConnectHealth}>{ONBOARDING_COPY.profileHealthConnect}</Button>
                     ) : null}
                   </div>
                   <p className="text-sm text-muted-foreground">{ONBOARDING_COPY.saludTrust}</p>
