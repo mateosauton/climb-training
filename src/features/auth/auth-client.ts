@@ -25,6 +25,7 @@ export interface AuthClient {
   signUp(email: string, password: string, redirectTo: string): Promise<AuthSessionResult>;
   verifyEmailCode(email: string, code: string): Promise<AuthSessionResult>;
   signIn(email: string, password: string): Promise<AuthSessionResult>;
+  requestMagicLink(email: string, redirectTo: string): Promise<AuthActionResult>;
   requestPasswordReset(email: string, redirectTo: string): Promise<AuthActionResult>;
   resendConfirmation(email: string, redirectTo: string): Promise<AuthActionResult>;
   updatePassword(password: string): Promise<AuthActionResult>;
@@ -120,6 +121,13 @@ export function createSupabaseAuthClient(config: AuthConfig): AuthClient {
     async signIn(email, password) {
       const { data, error } = await client.auth.signInWithPassword({ email, password });
       return { session: toSession(data.session), error: toFailure(error) };
+    },
+    async requestMagicLink(email, redirectTo) {
+      const { error } = await client.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: redirectTo, shouldCreateUser: true }
+      });
+      return { error: toFailure(error) };
     },
     async requestPasswordReset(email, redirectTo) {
       const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });

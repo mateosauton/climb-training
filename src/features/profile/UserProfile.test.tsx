@@ -130,6 +130,16 @@ describe("UserProfile", () => {
     expect(await screen.findByText("Cambios guardados localmente. La sincronización quedó pendiente.")).toBeInTheDocument();
   });
 
+  it("explains read-only Salud and disconnects it from the account tab", async () => {
+    const onDisconnectHealth = vi.fn();
+    const user = userEvent.setup();
+    renderProfile({ healthConnected: true, onDisconnectHealth });
+    await user.click(screen.getByRole("tab", { name: "Cuenta" }));
+    expect(screen.getByText("Solo lectura. No es consejo médico: Maillon usa esto únicamente para ajustar descanso y carga. Puedes desconectar en Perfil.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Desconectar Salud" }));
+    expect(onDisconnectHealth).toHaveBeenCalledOnce();
+  });
+
   it("supports keyboard navigation between editing tabs", async () => {
     const user = userEvent.setup();
     renderProfile();

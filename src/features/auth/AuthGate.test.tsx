@@ -17,6 +17,7 @@ function fakeClient(session: AuthSession = null) {
     signUp: vi.fn(async () => ({ session: null, error: null })),
     verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
+    requestMagicLink: vi.fn(async () => ({ error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
     resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
@@ -35,6 +36,7 @@ function renderGate(authClient: AuthClient | null) {
 
 describe("AuthGate", () => {
   beforeEach(() => {
+    localStorage.clear();
     window.history.replaceState(null, "", "/escalada/login");
   });
 
@@ -57,185 +59,94 @@ describe("AuthGate", () => {
     expect(screen.queryByText(/tracker for/)).not.toBeInTheDocument();
   });
 
-  it("shows Maillon login copy on the dusty gate", async () => {
+  it("shows the magic-link gate without a password or code field", async () => {
     renderGate(fakeClient().client);
     expect(await screen.findByRole("heading", { name: "Maillon" })).toBeInTheDocument();
-    expect(screen.getByText("Inicia sesión para ver tu plan y guardar tus sesiones en tu cuenta.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Iniciar sesión" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "¿Olvidaste tu contraseña?" })).toBeInTheDocument();
-    expect(screen.getByText("¿No tienes cuenta?")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Crear cuenta" })).toBeInTheDocument();
-    expect(screen.getByText("Tus sesiones se guardan en este dispositivo y se sincronizan con tu cuenta.")).toBeInTheDocument();
-    expect(screen.queryByText(/Escalada 4W|permanecen en este dispositivo|registros locales/)).not.toBeInTheDocument();
+    expect(screen.getByText("Entra o crea tu cuenta con tu correo. Sin contraseña.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar link" })).toBeInTheDocument();
+    expect(screen.getByText("Si es tu primera vez, el mismo link crea tu cuenta.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Contraseña")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/código/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Crear cuenta" })).not.toBeInTheDocument();
     expect(document.querySelector(".auth-gate")).toHaveClass("auth-gate");
-    expect(screen.getByRole("button", { name: "Iniciar sesión" })).toHaveClass("auth-primary");
+    expect(screen.getByRole("button", { name: "Enviar link" })).toHaveClass("auth-primary");
 
     const email = screen.getByLabelText("Correo");
-    const password = screen.getByLabelText("Contraseña");
     expect(email).toHaveAttribute("type", "email");
     expect(email).toHaveAttribute("autocomplete", "email");
-    expect(password).toHaveAttribute("autocomplete", "current-password");
     expect(email).toHaveClass("auth-input");
   });
 
-  it("signs in with email and password", async () => {
+  it("sends a magic link and shows the 15 minute check-email screen", async () => {
     const auth = fakeClient();
     renderGate(auth.client);
     const user = userEvent.setup();
 
     await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Iniciar sesión" }));
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
 
-    expect(auth.client.signIn).toHaveBeenCalledWith("mateo@example.com", "password1");
+    expect(auth.client.requestMagicLink).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/");
+    expect(auth.client.signIn).not.toHaveBeenCalled();
+    expect(auth.client.signUp).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "Revisa tu correo" })).toBeInTheDocument();
+    expect(screen.getByText("Ábrelo desde este teléfono y entras directo. El link vence en 15 minutos.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Contraseña")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/código/i)).not.toBeInTheDocument();
   });
 
-  it("toggles password visibility", async () => {
+  it("keeps password recovery reachable from the reset route", async () => {
+    window.history.replaceState(null, "", "/escalada/reset/nueva");
     renderGate(fakeClient().client);
     const user = userEvent.setup();
-    const password = await screen.findByLabelText("Contraseña");
+    const password = await screen.findByLabelText("Nueva contraseña");
     expect(password).toHaveAttribute("type", "password");
     await user.click(screen.getByRole("button", { name: "Mostrar contraseña" }));
     expect(password).toHaveAttribute("type", "text");
     expect(screen.getByRole("button", { name: "Ocultar contraseña" })).toBeInTheDocument();
   });
 
-  it("creates an account and continues after the confirmation link", async () => {
-    const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockResolvedValue({
-      session: { user: { id: "verified-user", email: "mateo@example.com" } },
-      error: null
-    });
-    renderGate(auth.client);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
-    expect(await screen.findByRole("heading", { name: "Crea tu cuenta" })).toBeInTheDocument();
-    expect(screen.getByText("Guarda tu plan y tus sesiones, y úsalos en cualquier dispositivo.")).toBeInTheDocument();
-    expect(screen.getByText("Mínimo 8 caracteres.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Términos" })).toHaveAttribute("href", "/escalada/terminos");
-    expect(screen.getByRole("link", { name: "Política de privacidad" })).toHaveAttribute("href", "/escalada/privacidad");
-    expect(screen.getByLabelText("Contraseña")).toHaveAttribute("autocomplete", "new-password");
-
-    await user.type(screen.getByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
-
-    expect(auth.client.signUp).toHaveBeenCalledWith("mateo@example.com", "password1", "https://example.com/escalada/");
-    expect(await screen.findByRole("heading", { name: "Confirma tu correo" })).toBeInTheDocument();
-    expect(screen.getByText("Te enviamos un enlace para confirmar tu cuenta. Ábrelo desde el correo; no hace falta un código.")).toBeInTheDocument();
-    expect(screen.getByText("Revisa tu correo y abre el enlace de confirmación. Si no aparece, revisa spam.")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Confirmar código" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Ya abrí el enlace" }));
-
-    expect(auth.client.signIn).toHaveBeenCalledWith("mateo@example.com", "password1");
-    expect(await screen.findByText("tracker for verified-user")).toBeInTheDocument();
-  });
-
-  it("enters the app when the confirmation link creates a session in this browser", async () => {
+  it("enters the app when the magic link creates a session in this browser", async () => {
     const auth = fakeClient();
     renderGate(auth.client);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
     await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
-    expect(await screen.findByRole("heading", { name: "Confirma tu correo" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
+    expect(await screen.findByRole("heading", { name: "Revisa tu correo" })).toBeInTheDocument();
 
     vi.mocked(auth.client.getSession).mockResolvedValue({
       session: { user: { id: "verified-user", email: "mateo@example.com" } },
       error: null
     });
-    await user.click(screen.getByRole("button", { name: "Ya abrí el enlace" }));
+    document.dispatchEvent(new Event("visibilitychange"));
 
     expect(auth.client.signIn).not.toHaveBeenCalled();
+    expect(auth.client.verifyEmailCode).not.toHaveBeenCalled();
     expect(await screen.findByText("tracker for verified-user")).toBeInTheDocument();
   });
 
-  it("keeps waiting when the confirmation link has not been opened yet", async () => {
-    const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockResolvedValue({ session: null, error: "email_not_confirmed" });
-    renderGate(auth.client);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
-    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
-    await user.click(await screen.findByRole("button", { name: "Ya abrí el enlace" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Confirma tu correo para continuar.");
-    expect(screen.getByRole("heading", { name: "Confirma tu correo" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
-  });
-
-  it("resends the confirmation link and can return to sign in", async () => {
-    const auth = fakeClient();
-    renderGate(auth.client);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
-    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
-    await user.click(await screen.findByRole("button", { name: "Reenviar enlace" }));
-
-    expect(auth.client.resendConfirmation).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/");
-    expect(await screen.findByText("Te reenviamos el enlace de confirmación.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("link", { name: "Volver a iniciar sesión" }));
-    expect(await screen.findByRole("heading", { name: "Maillon" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Confirma tu correo" })).not.toBeInTheDocument();
-  });
-
-  it("tells an existing account to sign in or reset instead of waiting for mail", async () => {
+  it("uses the same magic-link gate for signup and rejects an invalid email locally", async () => {
     window.history.replaceState(null, "", "/escalada/signup?next=%2Fescalada%2Fplan");
     const auth = fakeClient();
-    vi.mocked(auth.client.signUp).mockResolvedValue({ session: null, error: "email_exists" });
     renderGate(auth.client);
     const user = userEvent.setup();
 
-    await user.type(await screen.findByLabelText("Correo"), "sautonmateo@gmail.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Este correo ya tiene una cuenta. Iniciá sesión o recuperá tu contraseña.");
-    expect(screen.queryByText("Revisa tu correo y abre el enlace de confirmación. Si no aparece, revisa spam.")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Iniciá sesión" })).toHaveAttribute("href", "/escalada/login?next=%2Fescalada%2Fplan");
-    expect(screen.getByRole("link", { name: "recuperá tu contraseña" })).toHaveAttribute("href", "/escalada/reset?next=%2Fescalada%2Fplan");
-
-    await user.click(screen.getByRole("link", { name: "Iniciá sesión" }));
     expect(await screen.findByRole("heading", { name: "Maillon" })).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
+    expect(screen.queryByLabelText("Contraseña")).not.toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get("next")).toBe("/escalada/plan");
+    await user.type(screen.getByLabelText("Correo"), "mateo@correo");
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
 
-  it("keeps a short signup password from being submitted", async () => {
-    const auth = fakeClient();
-    renderGate(auth.client);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
-    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "short");
-    await user.tab();
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
-
-    expect(screen.getByText("Mínimo 8 caracteres.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Contraseña")).toHaveAttribute("aria-invalid", "true");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ese correo no parece válido. Revisa que tenga @ y dominio.");
+    expect(auth.client.requestMagicLink).not.toHaveBeenCalled();
     expect(auth.client.signUp).not.toHaveBeenCalled();
   });
 
   it("requests a password reset without revealing account existence", async () => {
+    window.history.replaceState(null, "", "/escalada/reset");
     const auth = fakeClient();
     renderGate(auth.client);
     const user = userEvent.setup();
-
-    await user.click(await screen.findByRole("link", { name: "¿Olvidaste tu contraseña?" }));
     expect(await screen.findByRole("heading", { name: "Recupera tu acceso" })).toBeInTheDocument();
     expect(screen.getByText("Te enviaremos un enlace para crear una nueva contraseña.")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Correo"), "mateo@example.com");
@@ -265,7 +176,7 @@ describe("AuthGate", () => {
   it("updates the password from a recovery session", async () => {
     const auth = fakeClient();
     renderGate(auth.client);
-    await screen.findByRole("button", { name: "Iniciar sesión" });
+    await screen.findByRole("button", { name: "Enviar link" });
 
     act(() => auth.emit("PASSWORD_RECOVERY", { user: { id: "user-1", email: "mateo@example.com" } }));
     const user = userEvent.setup();
@@ -280,51 +191,32 @@ describe("AuthGate", () => {
 
   it("shows sanitized authentication errors", async () => {
     const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockResolvedValue({ session: null, error: "invalid_credentials" });
+    vi.mocked(auth.client.requestMagicLink).mockResolvedValue({ error: "unknown" });
     renderGate(auth.client);
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "wrong-password");
-    await user.click(screen.getByRole("button", { name: "Iniciar sesión" }));
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Correo o contraseña incorrectos.");
-    expect(screen.getByRole("alert")).not.toHaveTextContent("invalid_credentials");
-  });
-
-  it("offers to resend when the email is unconfirmed", async () => {
-    const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockResolvedValue({ session: null, error: "email_not_confirmed" });
-    renderGate(auth.client);
-    const user = userEvent.setup();
-    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Iniciar sesión" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Confirma tu correo para continuar. Reenviar enlace");
-    await user.click(screen.getByRole("button", { name: "Reenviar enlace" }));
-    expect(auth.client.resendConfirmation).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/");
+    expect(await screen.findByRole("alert")).toHaveTextContent("No pudimos enviar el link. Intenta de nuevo.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("unknown");
+    expect(screen.queryByLabelText(/código/i)).not.toBeInTheDocument();
   });
 
   it("reports a lost connection without a provider message", async () => {
     const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.mocked(auth.client.requestMagicLink).mockRejectedValue(new TypeError("Failed to fetch"));
     renderGate(auth.client);
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Iniciar sesión" }));
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Sin conexión. Intenta de nuevo.");
     expect(screen.getByRole("alert")).not.toHaveTextContent("Failed to fetch");
   });
 
-  it("sends a protected route through login and back to that path", async () => {
+  it("sends a protected route through the magic link and back to that path", async () => {
     window.history.replaceState(null, "", "/escalada/plan");
     const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockResolvedValue({
-      session: { user: { id: "user-1", email: "mateo@example.com" } },
-      error: null
-    });
     renderGate(auth.client);
     const user = userEvent.setup();
 
@@ -332,14 +224,13 @@ describe("AuthGate", () => {
     expect(window.location.pathname).toBe("/escalada/login");
     expect(new URLSearchParams(window.location.search).get("next")).toBe("/escalada/plan");
 
-    await user.click(screen.getByRole("link", { name: "Crear cuenta" }));
-    expect(window.location.pathname).toBe("/escalada/signup");
-    expect(new URLSearchParams(window.location.search).get("next")).toBe("/escalada/plan");
-
-    await user.click(screen.getByRole("link", { name: "Inicia sesión" }));
     await user.type(screen.getByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Iniciar sesión" }));
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
+    vi.mocked(auth.client.getSession).mockResolvedValue({
+      session: { user: { id: "user-1", email: "mateo@example.com" } },
+      error: null
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() => expect(window.location.pathname).toBe("/escalada/plan"));
     expect(await screen.findByText("tracker for user-1")).toBeInTheDocument();
@@ -348,15 +239,15 @@ describe("AuthGate", () => {
   it.each(["https://evil.com", "//evil.com", "/\\evil.com"])("ignores an open redirect in next (%s)", async (next) => {
     window.history.replaceState(null, "", `/escalada/login?next=${encodeURIComponent(next)}`);
     const auth = fakeClient();
-    vi.mocked(auth.client.signIn).mockResolvedValue({
-      session: { user: { id: "user-1", email: "mateo@example.com" } },
-      error: null
-    });
     renderGate(auth.client);
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
-    await user.type(screen.getByLabelText("Contraseña"), "password1");
-    await user.click(screen.getByRole("button", { name: "Iniciar sesión" }));
+    await user.click(screen.getByRole("button", { name: "Enviar link" }));
+    vi.mocked(auth.client.getSession).mockResolvedValue({
+      session: { user: { id: "user-1", email: "mateo@example.com" } },
+      error: null
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() => expect(window.location.pathname).toBe("/escalada/plan"));
     expect(window.location.href).not.toContain("evil.com");
@@ -366,7 +257,7 @@ describe("AuthGate", () => {
     renderGate(fakeClient({ user: { id: "user-1", email: "mateo@example.com" } }).client);
     await waitFor(() => expect(window.location.pathname).toBe("/escalada/plan"));
     expect(await screen.findByText("tracker for user-1")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Iniciar sesión" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enviar link" })).not.toBeInTheDocument();
   });
 
   it("renders the legal stubs instead of a login redirect", async () => {
@@ -384,6 +275,6 @@ describe("AuthGate", () => {
     window.history.replaceState(null, "", "/escalada/");
     renderGate(fakeClient({ user: { id: "user-1", email: "mateo@example.com" } }).client);
     await waitFor(() => expect(screen.getByText("tracker for user-1")).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: "Iniciar sesión" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enviar link" })).not.toBeInTheDocument();
   });
 });
