@@ -12,6 +12,14 @@ proyectos ni respuestas que los contengan en el repositorio.
 - En **Authentication → Sign In / Providers**, habilita Email y decide si se
   exige confirmación de correo. Prueba alta, confirmación y recuperación con
   una cuenta no productiva después de cualquier cambio de URL.
+- La confirmación de alta es el enlace del correo, no un código de seis
+  dígitos. En **Authentication → Emails → Confirm signup** la plantilla tiene
+  que incluir `{{ .ConfirmationURL }}`. No la reemplaces por `{{ .Token }}`:
+  el cliente no pide ese código y las plantillas no viven en el repositorio
+  (en `supabase/config.toml` siguen comentadas). El `emailRedirectTo` es el
+  origen más `/escalada/`, por ejemplo
+  `https://climbing.mateosauton.com/escalada/`, y esa URL debe estar en Site
+  URL o en la lista de redirects.
 - Antes de producción, configura SMTP propio en **Project Settings →
   Authentication → SMTP Settings**. El proveedor de prueba no es un servicio
   de entrega de producción y está limitado. Guarda host, usuario y contraseña

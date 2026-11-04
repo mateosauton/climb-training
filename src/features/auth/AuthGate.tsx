@@ -144,7 +144,6 @@ export function AuthGate({ children }: AuthGateProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [passwordInvalid, setPasswordInvalid] = useState(false);
 
@@ -167,7 +166,6 @@ export function AuthGate({ children }: AuthGateProps) {
   const openScreen = (nextScreen: AuthScreen) => {
     setPassword("");
     setConfirmation("");
-    setVerificationCode("");
     setLocalError(null);
     setPasswordInvalid(false);
     auth.clearFeedback();
@@ -189,11 +187,13 @@ export function AuthGate({ children }: AuthGateProps) {
     event.preventDefault();
     setLocalError(null);
     if (auth.pendingVerificationEmail) {
-      if (!/^\d{6}$/.test(verificationCode)) {
-        setLocalError("Ingresa el código de seis dígitos.");
+      const found = await auth.reloadSession();
+      if (found) return;
+      if (password) {
+        await auth.signIn(auth.pendingVerificationEmail, password);
         return;
       }
-      await auth.verifyEmailCode(auth.pendingVerificationEmail, verificationCode);
+      setLocalError(AUTH_COPY.confirmWaiting);
       return;
     }
     if (screen === "reset-new" || auth.recoveryMode) {
@@ -252,7 +252,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const title = isNewPassword
     ? AUTH_COPY.newPasswordTitle
     : isVerifyingEmail
-      ? "Confirma tu correo"
+      ? AUTH_COPY.confirmTitle
       : formScreen === "signup"
         ? AUTH_COPY.signupTitle
         : formScreen === "reset"
@@ -261,7 +261,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const description = isNewPassword
     ? AUTH_COPY.newPasswordSubtitle
     : isVerifyingEmail
-      ? "Ingresa el código de seis dígitos que enviamos a tu correo."
+      ? AUTH_COPY.confirmSubtitle
       : formScreen === "signup"
         ? AUTH_COPY.signupSubtitle
         : formScreen === "reset"
@@ -331,26 +331,7 @@ export function AuthGate({ children }: AuthGateProps) {
         {auth.notice && !resetSent ? <p className="auth-note" role="status">{auth.notice}</p> : null}
 
         <form className="auth-form" onSubmit={submit}>
-          {isVerifyingEmail ? (
-            <div className="auth-field">
-              <label className="auth-label" htmlFor="auth-verification-code">Código de verificación</label>
-              <div className="auth-control">
-                <input
-                  id="auth-verification-code"
-                  className="auth-input"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  pattern="[0-9]{6}"
-                  value={verificationCode}
-                  onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                  disabled={auth.busy}
-                  required
-                />
-              </div>
-            </div>
-          ) : !isNewPassword ? (
+          {!isVerifyingEmail && !isNewPassword ? (
             <div className="auth-field">
               <label className="auth-label" htmlFor="auth-email">Correo</label>
               <div className="auth-control">
@@ -426,7 +407,18 @@ export function AuthGate({ children }: AuthGateProps) {
           {!resetSent ? (
             <button className="auth-primary" type="submit" disabled={auth.busy}>
               {auth.busy ? <LoaderCircle className="auth-spinner" size={18} aria-hidden="true" /> : null}
-              {isVerifyingEmail ? "Confirmar código" : isNewPassword ? AUTH_COPY.savePassword : formScreen === "signup" ? AUTH_COPY.createAccount : formScreen === "reset" ? AUTH_COPY.sendLink : AUTH_COPY.signIn}
+              {isVerifyingEmail ? AUTH_COPY.confirmContinue : isNewPassword ? AUTH_COPY.savePassword : formScreen === "signup" ? AUTH_COPY.createAccount : formScreen === "reset" ? AUTH_COPY.sendLink : AUTH_COPY.signIn}
+            </button>
+          ) : null}
+
+          {isVerifyingEmail && !needsConfirm ? (
+            <button
+              className="auth-outline"
+              type="button"
+              onClick={() => void auth.resendConfirmation(auth.pendingVerificationEmail ?? email.trim())}
+              disabled={auth.busy}
+            >
+              {AUTH_COPY.resendLink}
             </button>
           ) : null}
 
@@ -476,6 +468,20 @@ export function AuthGate({ children }: AuthGateProps) {
               </a>
             </div>
           </>
+        ) : null}
+
+        {isVerifyingEmail ? (
+          <a
+            className="auth-text-link"
+            href={authPath("login", nextRaw)}
+            onClick={(event) => {
+              event.preventDefault();
+              auth.clearPendingVerification();
+              openScreen("login");
+            }}
+          >
+            {AUTH_COPY.backToSignIn}
+          </a>
         ) : null}
 
         {!isVerifyingEmail && (formScreen === "reset" || isNewPassword) ? (

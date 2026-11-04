@@ -15,7 +15,8 @@ type AuthContextValue = {
   pendingVerificationEmail: string | null;
   signIn: (email: string, password: string) => Promise<boolean>;
   signUp: (email: string, password: string) => Promise<boolean>;
-  verifyEmailCode: (email: string, code: string) => Promise<boolean>;
+  reloadSession: () => Promise<boolean>;
+  clearPendingVerification: () => void;
   requestPasswordReset: (email: string) => Promise<boolean>;
   resendConfirmation: (email: string) => Promise<boolean>;
   updatePassword: (password: string) => Promise<boolean>;
@@ -131,6 +132,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
         return false;
       }
       setUser(result.session?.user ?? null);
+      if (result.session) setPendingVerificationEmail(null);
       return Boolean(result.session);
     } catch (error) {
       setError(actionError(error, "No pudimos iniciar sesión. Intenta de nuevo."));
@@ -153,7 +155,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
         setPendingVerificationEmail(null);
       } else {
         setPendingVerificationEmail(email);
-        setNotice("Revisa tu correo para obtener el código de seis dígitos.");
+        setNotice(AUTH_COPY.confirmSent);
       }
       return true;
     } catch (error) {
@@ -164,24 +166,46 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     }
   }, [beginAction, client, finishAction, redirectTo]);
 
-  const verifyEmailCode = useCallback(async (email: string, code: string) => {
-    if (!client || !beginAction()) return false;
+  const reloadSession = useCallback(async () => {
+    if (!client) return false;
     try {
-      const result = await client.verifyEmailCode(email, code);
-      if (result.error || !result.session) {
-        setError(result.error ? failureMessage(result.error, "No pudimos confirmar el código. Intenta de nuevo.") : "No pudimos confirmar el código. Intenta de nuevo.");
-        return false;
-      }
+      const result = await client.getSession();
+      if (!result.session) return false;
       setUser(result.session.user);
       setPendingVerificationEmail(null);
+      setError(null);
       return true;
     } catch {
-      setError("No pudimos confirmar el código. Intenta de nuevo.");
       return false;
-    } finally {
-      finishAction();
     }
-  }, [beginAction, client, finishAction]);
+  }, [client]);
+
+  const clearPendingVerification = useCallback(() => {
+    setPendingVerificationEmail(null);
+  }, []);
+
+  useEffect(() => {
+    if (!client || !pendingVerificationEmail) return;
+    let active = true;
+    const check = () => {
+      void client.getSession().then((result) => {
+        if (!active || !result.session) return;
+        setUser(result.session.user);
+        setPendingVerificationEmail(null);
+        setError(null);
+      }).catch(() => undefined);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", check);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", check);
+    };
+  }, [client, pendingVerificationEmail]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
     if (!client || !beginAction()) return false;
@@ -213,6 +237,10 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
         setError(failureMessage(result.error, "No pudimos reenviar el enlace. Intenta de nuevo."));
         return false;
       }
+      if (pendingVerificationEmail) {
+        setNotice(AUTH_COPY.confirmResent);
+        return true;
+      }
       setError(AUTH_COPY.confirmEmail);
       return true;
     } catch (error) {
@@ -221,7 +249,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     } finally {
       finishAction();
     }
-  }, [beginAction, client, finishAction, redirectTo]);
+  }, [beginAction, client, finishAction, pendingVerificationEmail, redirectTo]);
 
   const updatePassword = useCallback(async (password: string) => {
     if (!client || !beginAction()) return false;
@@ -274,14 +302,15 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     pendingVerificationEmail,
     signIn,
     signUp,
-    verifyEmailCode,
+    reloadSession,
+    clearPendingVerification,
     requestPasswordReset,
     resendConfirmation,
     updatePassword,
     clearFeedback,
     signingOut,
     signOut
-  }), [busy, clearFeedback, client, error, loading, notice, pendingVerificationEmail, recoveryMode, requestPasswordReset, resendConfirmation, signIn, signOut, signUp, signingOut, updatePassword, user, verifyEmailCode]);
+  }), [busy, clearFeedback, clearPendingVerification, client, error, loading, notice, pendingVerificationEmail, recoveryMode, reloadSession, requestPasswordReset, resendConfirmation, signIn, signOut, signUp, signingOut, updatePassword, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
