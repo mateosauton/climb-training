@@ -1,7 +1,5 @@
 import type { AuthClient, AuthEvent, AuthSession } from "./auth-client";
 
-export const E2E_EMAIL_VERIFICATION_CODE = "123456";
-
 export function createE2EAuthClient(id: string, email: string | null, signedIn = true): AuthClient {
   let session: AuthSession = signedIn ? { user: { id, email } } : null;
   let pendingEmail: string | null = null;
@@ -18,16 +16,16 @@ export function createE2EAuthClient(id: string, email: string | null, signedIn =
       pendingEmail = nextEmail;
       return { session: null, error: null };
     },
-    async verifyEmailCode(nextEmail, code) {
-      if (pendingEmail !== nextEmail || code !== E2E_EMAIL_VERIFICATION_CODE) {
-        return { session: null, error: "invalid_credentials" };
-      }
-      session = { user: { id, email: nextEmail } };
-      pendingEmail = null;
-      listener("SIGNED_IN", session);
-      return { session, error: null };
+    async verifyEmailCode() {
+      return { session: null, error: "unknown" };
     },
-    async signIn() {
+    async signIn(nextEmail) {
+      if (pendingEmail && nextEmail === pendingEmail) {
+        session = { user: { id, email: nextEmail } };
+        pendingEmail = null;
+        listener("SIGNED_IN", session);
+        return { session, error: null };
+      }
       return { session: null, error: "unknown" };
     },
     async requestPasswordReset() {

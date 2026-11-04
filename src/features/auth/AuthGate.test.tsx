@@ -100,9 +100,9 @@ describe("AuthGate", () => {
     expect(screen.getByRole("button", { name: "Ocultar contraseña" })).toBeInTheDocument();
   });
 
-  it("creates an account then verifies a six-digit email code", async () => {
+  it("creates an account and continues after the confirmation link", async () => {
     const auth = fakeClient();
-    vi.mocked(auth.client.verifyEmailCode).mockResolvedValue({
+    vi.mocked(auth.client.signIn).mockResolvedValue({
       session: { user: { id: "verified-user", email: "mateo@example.com" } },
       error: null
     });
@@ -122,16 +122,73 @@ describe("AuthGate", () => {
     await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
 
     expect(auth.client.signUp).toHaveBeenCalledWith("mateo@example.com", "password1", "https://example.com/escalada/");
-    expect(await screen.findByText("Revisa tu correo para obtener el código de seis dígitos.")).toBeInTheDocument();
-    const code = screen.getByLabelText("Código de verificación");
-    expect(code).toHaveAttribute("inputmode", "numeric");
-    expect(code).toHaveAttribute("maxlength", "6");
+    expect(await screen.findByRole("heading", { name: "Confirma tu correo" })).toBeInTheDocument();
+    expect(screen.getByText("Te enviamos un enlace para confirmar tu cuenta. Ábrelo desde el correo; no hace falta un código.")).toBeInTheDocument();
+    expect(screen.getByText("Revisa tu correo y abre el enlace de confirmación. Si no aparece, revisa spam.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirmar código" })).not.toBeInTheDocument();
 
-    await user.type(code, "123456");
-    await user.click(screen.getByRole("button", { name: "Confirmar código" }));
+    await user.click(screen.getByRole("button", { name: "Ya abrí el enlace" }));
 
-    expect(auth.client.verifyEmailCode).toHaveBeenCalledWith("mateo@example.com", "123456");
+    expect(auth.client.signIn).toHaveBeenCalledWith("mateo@example.com", "password1");
     expect(await screen.findByText("tracker for verified-user")).toBeInTheDocument();
+  });
+
+  it("enters the app when the confirmation link creates a session in this browser", async () => {
+    const auth = fakeClient();
+    renderGate(auth.client);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
+    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
+    await user.type(screen.getByLabelText("Contraseña"), "password1");
+    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
+    expect(await screen.findByRole("heading", { name: "Confirma tu correo" })).toBeInTheDocument();
+
+    vi.mocked(auth.client.getSession).mockResolvedValue({
+      session: { user: { id: "verified-user", email: "mateo@example.com" } },
+      error: null
+    });
+    await user.click(screen.getByRole("button", { name: "Ya abrí el enlace" }));
+
+    expect(auth.client.signIn).not.toHaveBeenCalled();
+    expect(await screen.findByText("tracker for verified-user")).toBeInTheDocument();
+  });
+
+  it("keeps waiting when the confirmation link has not been opened yet", async () => {
+    const auth = fakeClient();
+    vi.mocked(auth.client.signIn).mockResolvedValue({ session: null, error: "email_not_confirmed" });
+    renderGate(auth.client);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
+    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
+    await user.type(screen.getByLabelText("Contraseña"), "password1");
+    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
+    await user.click(await screen.findByRole("button", { name: "Ya abrí el enlace" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Confirma tu correo para continuar.");
+    expect(screen.getByRole("heading", { name: "Confirma tu correo" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
+  });
+
+  it("resends the confirmation link and can return to sign in", async () => {
+    const auth = fakeClient();
+    renderGate(auth.client);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("link", { name: "Crear cuenta" }));
+    await user.type(await screen.findByLabelText("Correo"), "mateo@example.com");
+    await user.type(screen.getByLabelText("Contraseña"), "password1");
+    await user.click(screen.getByRole("button", { name: "Crear cuenta" }));
+    await user.click(await screen.findByRole("button", { name: "Reenviar enlace" }));
+
+    expect(auth.client.resendConfirmation).toHaveBeenCalledWith("mateo@example.com", "https://example.com/escalada/");
+    expect(await screen.findByText("Te reenviamos el enlace de confirmación.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Volver a iniciar sesión" }));
+    expect(await screen.findByRole("heading", { name: "Maillon" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Confirma tu correo" })).not.toBeInTheDocument();
   });
 
   it("tells an existing account to sign in or reset instead of waiting for mail", async () => {
@@ -147,7 +204,7 @@ describe("AuthGate", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Este correo ya tiene una cuenta. Iniciá sesión o recuperá tu contraseña.");
-    expect(screen.queryByText("Revisa tu correo para obtener el código de seis dígitos.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Revisa tu correo y abre el enlace de confirmación. Si no aparece, revisa spam.")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Código de verificación")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Iniciá sesión" })).toHaveAttribute("href", "/escalada/login?next=%2Fescalada%2Fplan");
     expect(screen.getByRole("link", { name: "recuperá tu contraseña" })).toHaveAttribute("href", "/escalada/reset?next=%2Fescalada%2Fplan");
