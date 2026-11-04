@@ -10,12 +10,12 @@ test("new user verifies their email, completes onboarding, and generates a plan"
   await page.getByLabel("Contraseña", { exact: true }).fill("password1");
   await page.getByRole("button", { name: "Crear cuenta" }).click();
 
-  await expect(page.getByText("Revisa tu correo para obtener el código de seis dígitos.")).toBeVisible();
-  await expect(page.getByLabel("Código de verificación")).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("registration-code.png"), fullPage: true });
+  await expect(page.getByRole("heading", { name: "Confirma tu correo" })).toBeVisible();
+  await expect(page.getByText("Te enviamos un enlace para confirmar tu cuenta. Ábrelo desde el correo; no hace falta un código.")).toBeVisible();
+  await expect(page.getByLabel("Código de verificación")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("registration-confirm-link.png"), fullPage: true });
 
-  await page.getByLabel("Código de verificación").fill("123456");
-  await page.getByRole("button", { name: "Confirmar código" }).click();
+  await page.getByRole("button", { name: "Ya abrí el enlace" }).click();
 
   await expect(page.getByText("Cuestionario del escalador", { exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Nombre", exact: true }).fill("Nuevo Escalador");

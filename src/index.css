@@ -363,6 +363,8 @@ body:has(.auth-gate) {
 
 .auth-outline:hover { background: rgb(44 58 51 / 70%); }
 
+.auth-outline:disabled { cursor: not-allowed; opacity: 0.55; }
+
 .auth-primary:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .auth-divider {
