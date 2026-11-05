@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -28,14 +28,22 @@ function seedMateoEnvelope() {
   localStorage.setItem(USER_DATA_STORAGE_KEY, JSON.stringify(envelope));
 }
 
+function openQuestionnaire() {
+  return userEvent.click(screen.getByRole("button", { name: /Abrir perfil de/ })).then(() =>
+    userEvent.click(screen.getByRole("button", { name: "Abrir cuestionario" }))
+  ).then(() => screen.getByRole("dialog"));
+}
+
 describe("cloud baseline", () => {
   it("starts a fresh cloud signup with an empty name and no injury or recovery pills", async () => {
     const user = userEvent.setup();
     seedMateoEnvelope();
     render(<App cloudVerified cloudHydration={emptyHydration} />);
 
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abrir perfil de Escalador" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Nombre")).toHaveValue("");
+    const dialog = await openQuestionnaire();
+    expect(within(dialog).getByLabelText("Nombre")).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: "4. Carga y recuperacion" }));
     for (const label of ["Dedos sensibles", "Codo cargado", "Hombro cargado", "Piel limitada", "Sueno bajo", "Energia baja", "Sin senales"]) {
@@ -50,11 +58,13 @@ describe("cloud baseline", () => {
     expect(document.querySelectorAll('input[name="injuryHistory"]')).toHaveLength(0);
   });
 
-  it("keeps the Mateo demo seed on the logged-out questionnaire", () => {
+  it("keeps the Mateo demo seed on the questionnaire opened from Perfil", async () => {
     render(<App />);
 
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Abrir perfil de Mateo" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Nombre")).toHaveValue("Mateo");
+    const dialog = await openQuestionnaire();
+    expect(within(dialog).getByLabelText("Nombre")).toHaveValue("Mateo");
   });
 });
 
@@ -62,6 +72,7 @@ describe("questionnaire multi-select in the app", () => {
   it("selects Hangboard alone and lets it be cleared", async () => {
     const user = userEvent.setup();
     render(<App />);
+    await openQuestionnaire();
     await user.click(screen.getByRole("button", { name: "4. Carga y recuperacion" }));
 
     const hangboard = screen.getByRole("button", { name: "Hangboard" });
@@ -83,6 +94,7 @@ describe("questionnaire multi-select in the app", () => {
   it("does not preselect injury or recovery pills from the demo freeform seed", async () => {
     const user = userEvent.setup();
     render(<App />);
+    await openQuestionnaire();
 
     await user.click(screen.getByRole("button", { name: "5. Lesiones y salud" }));
     expect(screen.getByRole("button", { name: "Codo" })).toHaveAttribute("aria-pressed", "false");
@@ -99,6 +111,7 @@ describe("questionnaire multi-select in the app", () => {
   it("saves a questionnaire without legacy freeform injury or recovery tokens", async () => {
     const user = userEvent.setup();
     render(<App />);
+    await openQuestionnaire();
 
     for (let step = 0; step < 5; step += 1) {
       await user.click(screen.getByRole("button", { name: "Siguiente" }));

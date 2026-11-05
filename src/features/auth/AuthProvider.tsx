@@ -14,6 +14,7 @@ type AuthContextValue = {
   recoveryMode: boolean;
   pendingVerificationEmail: string | null;
   signIn: (email: string, password: string) => Promise<boolean>;
+  sendMagicLink: (email: string) => Promise<boolean>;
   signUp: (email: string, password: string) => Promise<boolean>;
   reloadSession: () => Promise<boolean>;
   clearPendingVerification: () => void;
@@ -141,6 +142,23 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
       finishAction();
     }
   }, [beginAction, client, finishAction]);
+
+  const sendMagicLink = useCallback(async (email: string) => {
+    if (!client || !beginAction()) return false;
+    try {
+      const result = await client.requestMagicLink(email, redirectTo);
+      if (result.error) {
+        setError(failureMessage(result.error, "No pudimos enviar el link. Intenta de nuevo."));
+        return false;
+      }
+      return true;
+    } catch (error) {
+      setError(actionError(error, "No pudimos enviar el link. Intenta de nuevo."));
+      return false;
+    } finally {
+      finishAction();
+    }
+  }, [beginAction, client, finishAction, redirectTo]);
 
   const signUp = useCallback(async (email: string, password: string) => {
     if (!client || !beginAction()) return false;
@@ -301,6 +319,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     recoveryMode,
     pendingVerificationEmail,
     signIn,
+    sendMagicLink,
     signUp,
     reloadSession,
     clearPendingVerification,
@@ -310,7 +329,7 @@ export function AuthProvider({ client, redirectTo, children }: AuthProviderProps
     clearFeedback,
     signingOut,
     signOut
-  }), [busy, clearFeedback, clearPendingVerification, client, error, loading, notice, pendingVerificationEmail, recoveryMode, reloadSession, requestPasswordReset, resendConfirmation, signIn, signOut, signUp, signingOut, updatePassword, user]);
+  }), [busy, clearFeedback, clearPendingVerification, client, error, loading, notice, pendingVerificationEmail, recoveryMode, reloadSession, requestPasswordReset, resendConfirmation, sendMagicLink, signIn, signOut, signUp, signingOut, updatePassword, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

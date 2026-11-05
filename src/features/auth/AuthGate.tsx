@@ -1,6 +1,7 @@
 import { CircleAlert, Eye, EyeOff, LoaderCircle, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 
+import { MagicLinkGate } from "../onboarding/MagicLinkGate";
 import { AUTH_COPY } from "./auth-copy";
 import {
   acceptNext,
@@ -240,6 +241,22 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (auth.user && !auth.recoveryMode) return children(auth.user);
+
+  const magicGate = !auth.recoveryMode && !auth.pendingVerificationEmail && (screen === "login" || screen === "signup" || screen === null);
+  if (magicGate) {
+    return (
+      <AuthSurface>
+        {acceptNext(nextRaw) ? <p className="auth-banner" role="status">{AUTH_COPY.deepLink}</p> : null}
+        <MagicLinkGate
+          busy={auth.busy}
+          serverError={auth.error}
+          onSend={auth.sendMagicLink}
+          onDismissError={auth.clearFeedback}
+          onRefreshSession={auth.reloadSession}
+        />
+      </AuthSurface>
+    );
+  }
 
   const formScreen: AuthScreen = screen === "signup" || screen === "reset" || screen === "reset-new" ? screen : "login";
   const isVerifyingEmail = Boolean(auth.pendingVerificationEmail);

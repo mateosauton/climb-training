@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     signUp: vi.fn(),
     verifyOtp: vi.fn(),
     signInWithPassword: vi.fn(),
+    signInWithOtp: vi.fn(),
     resetPasswordForEmail: vi.fn(),
     resend: vi.fn(),
     updateUser: vi.fn(),
@@ -35,6 +36,7 @@ describe("createSupabaseAuthClient", () => {
     mocks.signUp.mockResolvedValue({ data: { session: null }, error: null });
     mocks.verifyOtp.mockResolvedValue({ data: { session: null }, error: null });
     mocks.signInWithPassword.mockResolvedValue({ data: { session: null }, error: null });
+    mocks.signInWithOtp.mockResolvedValue({ data: { session: null, user: null }, error: null });
     mocks.resetPasswordForEmail.mockResolvedValue({ error: null });
     mocks.resend.mockResolvedValue({ error: null });
     mocks.updateUser.mockResolvedValue({ error: null });
@@ -47,6 +49,7 @@ describe("createSupabaseAuthClient", () => {
     await client.signUp("user@example.com", "password1", "https://app.test/escalada/");
     await client.verifyEmailCode("user@example.com", "123456");
     await client.signIn("user@example.com", "password1");
+    await client.requestMagicLink("user@example.com", "https://app.test/escalada/");
     await client.requestPasswordReset("user@example.com", "https://app.test/escalada/");
     await client.resendConfirmation("user@example.com", "https://app.test/escalada/");
     await client.updatePassword("new-password1");
@@ -58,6 +61,10 @@ describe("createSupabaseAuthClient", () => {
     });
     expect(mocks.verifyOtp).toHaveBeenCalledWith({ email: "user@example.com", token: "123456", type: "email" });
     expect(mocks.signInWithPassword).toHaveBeenCalledWith({ email: "user@example.com", password: "password1" });
+    expect(mocks.signInWithOtp).toHaveBeenCalledWith({
+      email: "user@example.com",
+      options: { emailRedirectTo: "https://app.test/escalada/", shouldCreateUser: true }
+    });
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith("user@example.com", { redirectTo: "https://app.test/escalada/" });
     expect(mocks.resend).toHaveBeenCalledWith({
       type: "signup",

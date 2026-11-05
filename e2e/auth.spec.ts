@@ -37,5 +37,5 @@ test("sign-out returns to the email gate", async ({ page }) => {
   await openProfile(page);
   await page.getByRole("tab", { name: "Cuenta" }).click();
   await page.getByRole("button", { name: "Cerrar sesión" }).last().click();
-  await expect(page.getByRole("button", { name: "Iniciar sesión" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enviar link" })).toBeVisible();
 });

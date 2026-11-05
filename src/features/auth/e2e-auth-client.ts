@@ -4,7 +4,7 @@ export function createE2EAuthClient(id: string, email: string | null, signedIn =
   let session: AuthSession = signedIn ? { user: { id, email } } : null;
   let pendingEmail: string | null = null;
   let listener: (event: AuthEvent, next: AuthSession) => void = () => undefined;
-  return {
+  const client: AuthClient = {
     async getSession() {
       return { session, error: null };
     },
@@ -28,6 +28,10 @@ export function createE2EAuthClient(id: string, email: string | null, signedIn =
       }
       return { session: null, error: "unknown" };
     },
+    async requestMagicLink(nextEmail) {
+      pendingEmail = nextEmail;
+      return { error: null };
+    },
     async requestPasswordReset() {
       return { error: "unknown" };
     },
@@ -43,4 +47,13 @@ export function createE2EAuthClient(id: string, email: string | null, signedIn =
       return { error: null };
     }
   };
+  if (typeof window !== "undefined") {
+    (window as Window & { __maillonOpenMagicLink?: () => void }).__maillonOpenMagicLink = () => {
+      if (!pendingEmail) return;
+      session = { user: { id, email: pendingEmail } };
+      pendingEmail = null;
+      listener("SIGNED_IN", session);
+    };
+  }
+  return client;
 }

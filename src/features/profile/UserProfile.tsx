@@ -28,6 +28,7 @@ import {
   AlertDialogTrigger
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ONBOARDING_COPY } from "@/features/onboarding/onboarding-copy";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,9 @@ type UserProfileProps = {
   onReset: () => void;
   onSignOut: () => void;
   onOpenQuestionnaire: () => void;
+  healthConnected?: boolean;
+  onConnectHealth?: () => void;
+  onDisconnectHealth?: () => void;
   onToggleTheme: () => void;
   signingOut?: boolean;
   authError?: string;
@@ -216,6 +220,9 @@ export function UserProfile({
   onReset,
   onSignOut,
   onOpenQuestionnaire,
+  healthConnected = false,
+  onConnectHealth,
+  onDisconnectHealth,
   onToggleTheme,
   signingOut = false,
   authError = ""
@@ -385,6 +392,21 @@ export function UserProfile({
               </TabsContent>
 
               <TabsContent value="account" className="mt-5 space-y-5">
+                <div className="space-y-3 rounded-lg border p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{ONBOARDING_COPY.profileHealthTitle}</p>
+                      <p className="text-sm text-muted-foreground">{healthConnected ? ONBOARDING_COPY.profileHealthConnected : ONBOARDING_COPY.profileHealthDisconnected}</p>
+                    </div>
+                    {healthConnected && onDisconnectHealth ? (
+                      <Button type="button" variant="outline" onClick={onDisconnectHealth}>{ONBOARDING_COPY.profileHealthDisconnect}</Button>
+                    ) : null}
+                    {!healthConnected && onConnectHealth ? (
+                      <Button type="button" variant="outline" onClick={onConnectHealth}>{ONBOARDING_COPY.profileHealthConnect}</Button>
+                    ) : null}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{ONBOARDING_COPY.saludTrust}</p>
+                </div>
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Cuenta Supabase</p>
