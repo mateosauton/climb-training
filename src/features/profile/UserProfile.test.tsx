@@ -130,6 +130,28 @@ describe("UserProfile", () => {
     expect(await screen.findByText("Cambios guardados localmente. La sincronización quedó pendiente.")).toBeInTheDocument();
   });
 
+  it("explains read-only Salud and disconnects it from the account tab", async () => {
+    const onDisconnectHealth = vi.fn();
+    const user = userEvent.setup();
+    renderProfile({ healthConnected: true, onDisconnectHealth, onConnectHealth: vi.fn() });
+    await user.click(screen.getByRole("tab", { name: "Cuenta" }));
+    expect(screen.getByText("Solo lectura. No es consejo médico: Maillon usa esto únicamente para ajustar descanso y carga. Puedes desconectar en Perfil.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Conectar Salud" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Desconectar Salud" }));
+    expect(onDisconnectHealth).toHaveBeenCalledOnce();
+  });
+
+  it("offers Conectar Salud when the account is skipped or disconnected", async () => {
+    const onConnectHealth = vi.fn();
+    const user = userEvent.setup();
+    renderProfile({ healthConnected: false, onConnectHealth, onDisconnectHealth: vi.fn() });
+    await user.click(screen.getByRole("tab", { name: "Cuenta" }));
+    expect(screen.getByText("No conectada. Puedes conectarla cuando quieras.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Desconectar Salud" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Conectar Salud" }));
+    expect(onConnectHealth).toHaveBeenCalledOnce();
+  });
+
   it("supports keyboard navigation between editing tabs", async () => {
     const user = userEvent.setup();
     renderProfile();

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,11 +21,18 @@ function authenticatedClient(session: AuthSession): AuthClient {
     signUp: vi.fn(async () => ({ session: null, error: null })),
     verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
+    requestMagicLink: vi.fn(async () => ({ error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
     resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
     signOut: vi.fn(async () => ({ error: null }))
   };
+}
+
+function openQuestionnaire() {
+  fireEvent.click(screen.getByRole("button", { name: /Abrir perfil de/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Abrir cuestionario" }));
+  return screen.getByRole("dialog");
 }
 
 function repository(ensureProfile: CloudRepository["ensureProfile"]): CloudRepository {
@@ -67,7 +74,8 @@ describe("cloud-primary app integration", () => {
     expect(screen.queryByRole("img", { name: "Vista previa de la foto de perfil" })).not.toBeInTheDocument();
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     expect(createSignedUrl).toHaveBeenCalledTimes(3);
-    expect(screen.getByRole("img", { name: "Vista previa de la foto de perfil" })).toHaveAttribute("src", "https://signed.test/refreshed");
+    const dialog = openQuestionnaire();
+    expect(within(dialog).getByRole("img", { name: "Vista previa de la foto de perfil" })).toHaveAttribute("src", "https://signed.test/refreshed");
     rendered.unmount();
     await act(async () => vi.runOnlyPendingTimersAsync());
     expect(createSignedUrl).toHaveBeenCalledTimes(3);
@@ -77,7 +85,7 @@ describe("cloud-primary app integration", () => {
     const ensureProfile = vi.fn(async () => undefined);
     render(<AppRoot client={authenticatedClient(null)} config={configured} origin="https://example.com" baseUrl="/" repository={repository(ensureProfile)} />);
 
-    expect(await screen.findByRole("button", { name: "Iniciar sesión" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Enviar link" })).toBeInTheDocument();
     expect(ensureProfile).not.toHaveBeenCalled();
   });
 
@@ -179,6 +187,7 @@ describe("cloud-primary app integration", () => {
     const generatePlan = vi.fn(async () => ({ jobId: "job-1", status: "published" as const }));
     const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire, generatePlan };
     render(<App cloudRepository={cloud} />);
+    openQuestionnaire();
 
     await screen.findByRole("button", { name: /^6\./ }).then((button) => button.click());
     await screen.findByRole("button", { name: "Guardar cuestionario" }).then((button) => button.click());
@@ -199,6 +208,7 @@ describe("cloud-primary app integration", () => {
     const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire, generatePlan };
     const user = userEvent.setup();
     render(<App cloudRepository={cloud} />);
+    openQuestionnaire();
 
     await user.click(await screen.findByRole("button", { name: /^6\./ }));
     await user.click(await screen.findByRole("button", { name: "Guardar cuestionario" }));
@@ -212,6 +222,7 @@ describe("cloud-primary app integration", () => {
     const submitQuestionnaire = vi.fn(async () => { throw new Error("offline"); });
     const cloud = { ...repository(vi.fn(async () => undefined)), submitQuestionnaire };
     const first = render(<App cloudRepository={cloud} />);
+    openQuestionnaire();
 
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
@@ -219,13 +230,19 @@ describe("cloud-primary app integration", () => {
     first.unmount();
 
     render(<App cloudRepository={cloud} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const envelope = JSON.parse(localStorage.getItem(USER_DATA_STORAGE_KEY) || "null");
+    const facts = envelope.users[envelope.activeUserId].facts as Array<{ key: string; value: unknown }>;
+    expect(facts.some((fact) => fact.key === "questionnaireCompleted" && fact.value === true)).toBe(false);
+    openQuestionnaire();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("disables local-only avatar selection and requires questionnaire submission", async () => {
     render(<App />);
+    const dialog = openQuestionnaire();
 
-    expect(screen.getByLabelText("Foto de perfil")).toBeDisabled();
+    expect(within(dialog).getByLabelText("Foto de perfil")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Completar mas tarde" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
@@ -244,8 +261,9 @@ describe("cloud-primary app integration", () => {
       createSignedUrl: vi.fn(async () => ({ data: { signedUrl: "https://signed.test/avatar" }, error: null }))
     })) } };
     const first = render(<App cloudRepository={cloud} cloudAvatarClient={cloudAvatarClient} />);
+    const dialog = openQuestionnaire();
 
-    fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
+    fireEvent.change(within(dialog).getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -257,7 +275,8 @@ describe("cloud-primary app integration", () => {
     localStorage.clear();
     const failingClient = { storage: { from: () => ({ upload: async () => ({ data: null, error: new Error("offline") }), remove: vi.fn(), createSignedUrl: vi.fn() }) } };
     render(<App cloudRepository={cloud} cloudAvatarClient={failingClient} />);
-    fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
+    const failedDialog = openQuestionnaire();
+    fireEvent.change(within(failedDialog).getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -283,9 +302,10 @@ describe("cloud-primary app integration", () => {
       profile: { avatarPath: "test-user/avatar.png" }
     };
     render(<App cloudRepository={cloud} cloudAvatarClient={cloudAvatarClient} cloudHydration={hydration} />);
-    await waitFor(() => expect(screen.getByRole("img", { name: "Vista previa de la foto de perfil" })).toHaveAttribute("src", "https://signed.test/old"));
+    const dialog = openQuestionnaire();
+    await waitFor(() => expect(within(dialog).getByRole("img", { name: "Vista previa de la foto de perfil" })).toHaveAttribute("src", "https://signed.test/old"));
 
-    fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["new"], "avatar.png", { type: "image/png" })] } });
+    fireEvent.change(within(dialog).getByLabelText("Foto de perfil"), { target: { files: [new File(["new"], "avatar.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
 
@@ -335,8 +355,9 @@ describe("cloud-primary app integration", () => {
       profile: { avatarPath: "test-user/avatar.webp" }
     };
     render(<App cloudRepository={cloud} cloudAvatarClient={cloudAvatarClient} cloudHydration={hydration} />);
+    const dialog = openQuestionnaire();
 
-    fireEvent.change(screen.getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
+    fireEvent.change(within(dialog).getByLabelText("Foto de perfil"), { target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] } });
     fireEvent.click(screen.getByRole("button", { name: /^6\./ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar cuestionario" }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });

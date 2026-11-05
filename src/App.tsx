@@ -149,6 +149,9 @@ import { ActivePlanNotice, PlanScreen } from "@/features/plan/PlanScreen";
 import { anchorLogFields, trainingLogs } from "@/features/p0/anchor-tests";
 import { ProgressDashboard } from "@/features/p0/ProgressDashboard";
 import { SessionLogger } from "@/features/p0/SessionLogger";
+import { FirstSessionQuestionnairePrompt } from "@/features/onboarding/FirstSessionQuestionnairePrompt";
+import { HealthOnboarding } from "@/features/onboarding/HealthOnboarding";
+import { disconnectHealth, finishHealthOnboarding, isHealthConnected, shouldOfferHealthOnboarding } from "@/features/onboarding/onboarding-storage";
 import {
   buildLoggerDraft,
   emptyPlanWeekEdits,
@@ -1321,7 +1324,10 @@ export default function App({
   const [videoValues, setVideoValues] = useState(defaultVideoValues);
   const [videoNotes, setVideoNotes] = useState("");
   const [showJson, setShowJson] = useState(false);
-  const [questionnaireOpen, setQuestionnaireOpen] = useState(() => !state.profile.questionnaireCompleted);
+  const [questionnaireOpen, setQuestionnaireOpen] = useState(false);
+  const [healthDismissed, setHealthDismissed] = useState(false);
+  const [healthManual, setHealthManual] = useState(false);
+  const [healthRevision, setHealthRevision] = useState(0);
   const [importStatus, setImportStatus] = useState(() => cloudImport && initialUserLoad.hasRecoveryEnvelope ? "pending" : "idle");
   const [questionnaireCloudStatus, setQuestionnaireCloudStatus] = useState("idle");
   const [avatarFile, setAvatarFile] = useState(null);
@@ -2325,7 +2331,6 @@ export default function App({
     });
     userDataRef.current = next;
     setUserData(next);
-    setQuestionnaireOpen(true);
     setLogForm(defaultLogValues);
     setSavedRecommendation(null);
     setVideoFile(null);
@@ -2341,9 +2346,29 @@ export default function App({
     });
   }
 
+  const offerHealth = healthManual || (!healthDismissed && shouldOfferHealthOnboarding(authUser.id, authUser.email));
+  const healthConnected = isHealthConnected(authUser.id) && healthRevision >= 0;
+
+  function closeHealth(choice: "skip" | "connected") {
+    finishHealthOnboarding(authUser.id, choice);
+    setHealthDismissed(true);
+    setHealthManual(false);
+    setHealthRevision((value) => value + 1);
+    if (!healthManual) setActiveTab("plan");
+  }
+
+  if (offerHealth) {
+    return (
+      <HealthOnboarding
+        onSkip={() => closeHealth("skip")}
+        onConnected={() => closeHealth("connected")}
+      />
+    );
+  }
+
   return (
     <TooltipProvider>
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground" data-testid="hoy">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,color-mix(in_oklch,var(--primary),transparent_72%),transparent_32rem)] opacity-70" />
         <Tabs value={activeTab} onValueChange={setActiveTab} className="min-h-svh w-full gap-0">
           <SidebarProvider>
@@ -2966,6 +2991,9 @@ export default function App({
         </TabsContent>
 
         <TabsContent value="log" className="mt-0">
+          {!state.profile.questionnaireCompleted ? (
+            <FirstSessionQuestionnairePrompt onOpen={() => setQuestionnaireOpen(true)} />
+          ) : null}
           {cloudVerified && !planNotice && loggerDraft ? (
             <SessionLogger
               draft={loggerDraft}
@@ -3373,6 +3401,12 @@ export default function App({
             onReset={() => void resetData()}
             onSignOut={onSignOut}
             onOpenQuestionnaire={() => setQuestionnaireOpen(true)}
+            healthConnected={healthConnected}
+            onConnectHealth={() => setHealthManual(true)}
+            onDisconnectHealth={() => {
+              disconnectHealth(authUser.id);
+              setHealthRevision((value) => value + 1);
+            }}
             onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
             signingOut={signingOut}
             authError={authError || ""}

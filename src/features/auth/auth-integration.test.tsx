@@ -19,6 +19,7 @@ function fakeClient(initial: AuthSession) {
     signUp: vi.fn(async () => ({ session: null, error: null })),
     verifyEmailCode: vi.fn(async () => ({ session: null, error: null })),
     signIn: vi.fn(async () => ({ session: null, error: null })),
+    requestMagicLink: vi.fn(async () => ({ error: null })),
     requestPasswordReset: vi.fn(async () => ({ error: null })),
     resendConfirmation: vi.fn(async () => ({ error: null })),
     updatePassword: vi.fn(async () => ({ error: null })),
@@ -45,7 +46,7 @@ describe("email auth app integration", () => {
   it("does not load local user data while signed out", async () => {
     localStorage.setItem("climb4w.state.v1", JSON.stringify(defaultState));
     render(<AppRoot client={fakeClient(null).client} config={configured} origin="https://example.com" baseUrl="/escalada/" />);
-    expect(await screen.findByRole("button", { name: "Iniciar sesión" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Enviar link" })).toBeInTheDocument();
     expect(localStorage.getItem(USER_DATA_STORAGE_KEY)).toBeNull();
   });
 
@@ -87,6 +88,6 @@ describe("email auth app integration", () => {
     render(<AppRoot client={auth.client} config={configured} origin="https://example.com" baseUrl="/escalada/" />);
     const buttons = await screen.findAllByRole("button", { name: "Cerrar sesión" });
     await userEvent.click(buttons[0]);
-    expect(await screen.findByRole("button", { name: "Iniciar sesión" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Enviar link" })).toBeInTheDocument();
   });
 });
